@@ -1,0 +1,69 @@
+# =============================================================================
+# application-development.yml
+#
+# Active when: spring.profiles.active=development  (set in application.yml)
+# Purpose: local dev overrides — real values so the app starts without
+#          any external env vars or .env loading tricks.
+#
+# This file IS safe to commit to git for a personal project because it only
+# contains local dev credentials. In a team project, add it to .gitignore
+# and have each developer maintain their own copy.
+#
+# These values OVERRIDE the placeholders in application.yml when the
+# development profile is active.
+# =============================================================================
+
+spring:
+
+  # ── MySQL — your local Ubuntu MySQL 8.4 ────────────────────────────────────
+  datasource:
+    url: jdbc:mysql://localhost:3306/banking_ledger?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+    username: dashuser
+    password: mypassword   # ← replace with your actual password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # ── Redis — Docker container on port 6380 ──────────────────────────────────
+  data:
+    redis:
+      host: localhost
+      port: 6380
+      password: RedisDevPass@99
+
+  # ── Quartz — in-memory store for development ───────────────────────────────
+  # No QRTZ_* tables needed, no datasource reference needed.
+  # The native properties block in application.yml has been stripped so
+  # job-store-type: memory here fully controls Quartz behaviour.
+  quartz:
+    job-store-type: memory
+    # Disable schema initialisation — not applicable for in-memory store
+    jdbc:
+      initialize-schema: never
+
+  # ── JPA — verbose SQL in dev ────────────────────────────────────────────────
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: update
+
+# ── JWT — dev secret (non-random, fine for local only) ─────────────────────
+app:
+  security:
+    jwt:
+      secret: bW9ja0RldlNlY3JldEtleUZvckxvY2FsRGV2ZWxvcG1lbnRPbmx5MjAyNUJhbmtpbmdMZWRnZXI=
+      expiration-ms: 3600000
+      refresh-expiration-ms: 86400000
+    cors:
+      allowed-origins: http://localhost:3000,http://localhost:5173
+
+  exchange-rate:
+    api-key: mock-key-not-needed-until-phase-5
+    base-url: https://v6.exchangerate-api.com/v6
+    cache-ttl-minutes: 60
+
+# ── Logging — debug everything in dev ──────────────────────────────────────
+logging:
+  level:
+    root: INFO
+    com.bankingcore.bankingledger: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.springframework.security: DEBUG

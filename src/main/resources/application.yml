@@ -1,0 +1,201 @@
+# =============================================================================
+# Banking Ledger — Application Configuration
+# All sensitive values are injected from environment variables.
+# No secrets, credentials, or URLs are hardcoded in this file.
+# =============================================================================
+
+spring:
+  application:
+    name: banking-ledger
+
+  # ─── Profiles ──────────────────────────────────────────────────────────────
+  profiles:
+    active: ${APP_ENVIRONMENT:development}
+
+  # ─── DataSource (MySQL) ────────────────────────────────────────────────────
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_HOST_PORT:3306}/${MYSQL_DATABASE:banking_ledger}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+    username: ${MYSQL_USER:MISSING_MYSQL_USER}
+    password: ${MYSQL_PASSWORD:MISSING_MYSQL_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: BankingLedgerPool
+      # Keep a modest pool; ledger workloads are typically short-lived transactions
+      minimum-idle: 5
+      maximum-pool-size: 20
+      connection-timeout: 30000       # 30 s — fail fast if DB is down
+      idle-timeout: 600000            # 10 min
+      max-lifetime: 1800000           # 30 min — recycle before MySQL's wait_timeout
+      connection-test-query: SELECT 1
+
+  # ─── JPA / Hibernate ───────────────────────────────────────────────────────
+  jpa:
+    hibernate:
+      # 'validate' in production — schema managed by Flyway/Liquibase (Phase 6)
+      # 'update' acceptable for early development phases
+      ddl-auto: update
+    show-sql: false   # enable per-profile below if needed
+    open-in-view: false   # prevent lazy-loading anti-pattern in web layer
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+        jdbc:
+          batch_size: 25
+          order_inserts: true
+          order_updates: true
+        connection:
+          charset: UTF-8
+
+  # ─── Redis / Redisson ──────────────────────────────────────────────────────
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_HOST_PORT:6380}
+      password: ${REDIS_PASSWORD:MISSING_REDIS_PASSWORD}
+      timeout: 3000ms
+      lettuce:
+        pool:
+          min-idle: 2
+          max-idle: 8
+          max-active: 16
+
+  # ─── Quartz Scheduler ──────────────────────────────────────────────────────
+  # job-store-type is set per profile:
+  #   development  → memory  (application-development.yml) — no DB tables needed
+  #   production   → jdbc    (application-production.yml)  — persisted triggers
+  # Only the scheduler name is set here; everything else is profile-specific.
+  quartz:
+    properties:
+      org.quartz:
+        scheduler:
+          instanceName: BankingLedgerScheduler
+        threadPool:
+          threadCount: 5
+
+  # ─── Jackson ───────────────────────────────────────────────────────────────
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+      indent-output: false
+    deserialization:
+      fail-on-unknown-properties: false
+    default-property-inclusion: non_null
+    time-zone: UTC
+
+# =============================================================================
+# Server
+# =============================================================================
+server:
+  port: 8080
+  servlet:
+    context-path: /api/v1
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/plain
+    min-response-size: 1024
+  error:
+    # Suppress Spring's default /error whitelabel — GlobalExceptionHandler owns all errors
+    whitelabel:
+      enabled: false
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+
+# =============================================================================
+# Security
+# =============================================================================
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:MISSING_JWT_SECRET}
+      expiration-ms: ${JWT_EXPIRATION_MS:3600000}
+      refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:86400000}
+    cors:
+      # Comma-separated allowed origins — consumed by CorsConfig bean (Phase 2)
+      allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
+  # ─── Exchange Rate ─────────────────────────────────────────────────────────
+  exchange-rate:
+    api-key: ${EXCHANGE_RATE_API_KEY}
+    base-url: ${EXCHANGE_RATE_BASE_URL:https://v6.exchangerate-api.com/v6}
+    # Cache TTL in minutes — avoid hammering the free-tier quota
+    cache-ttl-minutes: 60
+
+  # ─── Fee Engine ────────────────────────────────────────────────────────────
+  fee:
+    # Default tier thresholds (BigDecimal-compatible strings)
+    tier-low-threshold: "1000.00"
+    tier-high-threshold: "10000.00"
+    tier-low-rate: "0.0150"    # 1.50 %
+    tier-mid-rate: "0.0100"    # 1.00 %
+    tier-high-rate: "0.0050"   # 0.50 %
+
+# =============================================================================
+# Actuator — expose only required endpoints; lock down with security in Phase 6
+# =============================================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,loggers
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      show-components: when-authorized
+    metrics:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      environment: ${APP_ENVIRONMENT:development}
+
+# =============================================================================
+# Logging — structured JSON in production; human-readable in development
+# =============================================================================
+logging:
+  level:
+    root: ${LOG_LEVEL:INFO}
+    com.bankingcore.bankingledger: ${LOG_LEVEL:INFO}
+    org.springframework.security: WARN
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql: WARN
+  pattern:
+    # MDC keys (requestId, userId) are injected in Phase 6
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{requestId}] [%X{userId}] %logger{36} - %msg%n"
+
+---
+# =============================================================================
+# Profile: development — verbose SQL, relaxed settings
+# =============================================================================
+spring:
+  config:
+    activate:
+      on-profile: development
+  jpa:
+    show-sql: true
+
+logging:
+  level:
+    com.bankingcore.bankingledger: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
+---
+# =============================================================================
+# Profile: production — strict settings, no SQL echo
+# =============================================================================
+spring:
+  config:
+    activate:
+      on-profile: production
+  jpa:
+    hibernate:
+      ddl-auto: validate   # schema must be pre-applied via migration tool
+    show-sql: false
+
+logging:
+  level:
+    root: WARN
+    com.bankingcore.bankingledger: INFO

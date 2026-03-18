@@ -1,0 +1,54 @@
+# =============================================================================
+# Banking Ledger — Docker Compose
+# Provisions: Redis 7.2 only.
+#
+# MySQL is NOT managed here — you are using a local MySQL installation.
+# Before starting the app, make sure:
+#   1. MySQL is running locally on port 3306
+#   2. You have created the database and user:
+#
+#      CREATE DATABASE banking_ledger CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+#      CREATE USER 'ledger_app'@'localhost' IDENTIFIED BY 'Dev@1234';
+#      GRANT ALL PRIVILEGES ON banking_ledger.* TO 'ledger_app'@'localhost';
+#      FLUSH PRIVILEGES;
+#
+# Usage:
+#   cp .env.example .env
+#   docker compose up -d        # starts Redis only
+#   mvn spring-boot:run         # Spring Boot connects to local MySQL + Docker Redis
+# =============================================================================
+
+services:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Redis 7.2  (distributed locking, token blacklist, exchange rate cache)
+  # ─────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: banking_ledger_redis
+    restart: unless-stopped
+    # AOF persistence — lock state and cache survive container restarts
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --appendonly yes
+      --appendfsync everysec
+    ports:
+      # 6380 on host → 6379 inside container
+      # Using 6380 avoids conflicts if you already have a local Redis on 6379
+      - "${REDIS_HOST_PORT:-6380}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+# =============================================================================
+# Named Volumes
+# =============================================================================
+volumes:
+  redis_data:
+    driver: local
