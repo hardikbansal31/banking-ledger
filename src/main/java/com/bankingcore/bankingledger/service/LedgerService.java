@@ -15,7 +15,9 @@ import com.bankingcore.bankingledger.dto.response.TransactionResponse;
 import com.bankingcore.bankingledger.exception.AccountBlockedException;
 import com.bankingcore.bankingledger.exception.CurrencyMismatchException;
 import com.bankingcore.bankingledger.exception.InsufficientFundsException;
+import com.bankingcore.bankingledger.config.TransactionMetrics;
 import com.bankingcore.bankingledger.exception.ResourceNotFoundException;
+import com.bankingcore.bankingledger.exception.InsufficientFundsException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -60,6 +62,9 @@ public class LedgerService {
     private final AccountRepository       accountRepository;
     private final DistributedLockService  lockService;
     private final TransactionStateMachine stateMachine;
+    private final FeeEngine               feeEngine;
+    private final TransactionMetrics      transactionMetrics;
+    private final TransactionMetrics      metrics;
 
     // ── Transfer ──────────────────────────────────────────────────────────────
 
@@ -138,13 +143,28 @@ public class LedgerService {
         BigDecimal amount        = request.getAmount().setScale(4, RoundingMode.HALF_EVEN);
         BigDecimal roundedAmount = amount.setScale(2, RoundingMode.HALF_EVEN);
 
+        // Calculate fee for this transfer
+        BigDecimal feeAmount        = feeEngine.calculateFee(amount, request.getCurrency());
+        BigDecimal roundedFeeAmount = feeAmount.setScale(2, RoundingMode.HALF_EVEN);
+        BigDecimal totalDebit       = roundedAmount.add(roundedFeeAmount);
+
+        // Check sufficient funds including the fee
+        if (!source.hasSufficientFunds(totalDebit)) {
+            throw new InsufficientFundsException(
+                    source.getAccountNumber(), source.getBalance(), totalDebit);
+        }
+
+        log.debug("Fee: {} {} ({}) on transfer of {} {}",
+                feeAmount, request.getCurrency(),
+                feeEngine.describeTier(amount), amount, request.getCurrency());
+
         // Create transaction header — PENDING
         Transaction transaction = Transaction.builder()
                 .sourceAccount(source)
                 .destinationAccount(destination)
                 .amount(amount)
                 .currency(request.getCurrency().toUpperCase())
-                .feeAmount(BigDecimal.ZERO.setScale(4, RoundingMode.HALF_EVEN))
+                .feeAmount(feeAmount)
                 .transactionType(TransactionType.TRANSFER)
                 .status(TransactionStatus.PENDING)
                 .idempotencyKey(idempotencyKey)
@@ -207,6 +227,9 @@ public class LedgerService {
                     settled.getId(), roundedAmount, request.getCurrency(),
                     source.getAccountNumber(), destination.getAccountNumber());
 
+            metrics.incrementSettled();
+            metrics.recordFeeCollected(feeAmount);
+
             return toDetail(settled);
 
         } catch (Exception ex) {
@@ -215,6 +238,8 @@ public class LedgerService {
                 transaction.setStatus(TransactionStatus.FAILED);
                 transaction.setFailureReason(ex.getMessage());
                 transactionRepository.save(transaction);
+                metrics.incrementFailed();
+                transactionMetrics.incrementFailed();
                 log.error("Transfer FAILED id='{}' reason='{}'",
                         transaction.getId(), ex.getMessage());
             }
@@ -286,6 +311,7 @@ public class LedgerService {
         log.info("Deposit SETTLED id='{}' {} {} → '{}'",
                 settled.getId(), roundedAmount, request.getCurrency(),
                 destination.getAccountNumber());
+        metrics.incrementSettled();
         return toDetail(settled);
     }
 

@@ -76,6 +76,7 @@ spring:
   # ─── Jackson ───────────────────────────────────────────────────────────────
   jackson:
     serialization:
+      write-bigdecimal-as-plain: true
       write-dates-as-timestamps: false
       indent-output: false
     deserialization:
@@ -138,18 +139,38 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus,loggers
+        include: health,info,metrics,prometheus,loggers,env
       base-path: /actuator
+  info:
+    env:
+      enabled: true
+    build:
+      enabled: true
+    git:
+      enabled: true
   endpoint:
     health:
       show-details: when-authorized
       show-components: when-authorized
     metrics:
       enabled: true
+    prometheus:
+      enabled: true
   metrics:
     tags:
       application: ${spring.application.name}
       environment: ${APP_ENVIRONMENT:development}
+    export:
+      prometheus:
+        enabled: true
+  # Separate HTTP Basic credentials for actuator endpoints.
+  # These are independent of JWT — used by monitoring systems (Prometheus scraper,
+  # health check probes) that don't carry a user JWT.
+  server:
+    port: 8080   # same port, secured via Spring Security rules
+  actuator:
+    username: ${ACTUATOR_USERNAME:actuator_admin}
+    password: ${ACTUATOR_PASSWORD:ActuatorDev@55}
 
 # =============================================================================
 # Logging — structured JSON in production; human-readable in development
