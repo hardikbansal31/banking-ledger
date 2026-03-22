@@ -3,6 +3,7 @@ package com.bankingcore.bankingledger.controller;
 import com.bankingcore.bankingledger.dto.request.TransactionRequest;
 import com.bankingcore.bankingledger.dto.response.LedgerEntryResponse;
 import com.bankingcore.bankingledger.dto.response.TransactionResponse;
+import com.bankingcore.bankingledger.service.DistributedLockService;
 import com.bankingcore.bankingledger.service.LedgerService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,18 +23,34 @@ import java.util.UUID;
 /**
  * TransactionController — REST endpoints for the double-entry ledger.
  *
- * POST /transactions/transfer           → initiate a transfer
- * POST /admin/transactions/deposit      → admin: deposit funds
- * GET  /transactions/{id}               → get one transaction
- * GET  /accounts/{number}/transactions  → paginated transaction list
- * GET  /accounts/{number}/statement     → paginated ledger entries
+ * WHY THE LOCK IS ACQUIRED HERE (not in LedgerService):
+ *
+ *   Spring @Transactional works via proxy. When code inside LedgerService
+ *   calls another method on the same class (this.xyz()), it bypasses the
+ *   proxy — @Transactional is silently ignored.
+ *
+ *   The solution: the controller acquires the distributed lock, then calls
+ *   ledgerService.transfer() through the injected proxy. The proxy sees
+ *   the @Transactional annotation and opens a DB transaction. The full
+ *   order is:
+ *
+ *     Controller → lockService.executeWithLock(key,
+ *                     () -> ledgerService.transfer()  ← called on proxy ✓
+ *                  )
+ *
+ *   This ensures:
+ *     1. Redis lock is held       (DistributedLockService)
+ *     2. DB transaction is open   (@Transactional via proxy)
+ *     3. DB pessimistic lock held (SELECT FOR UPDATE inside transfer())
+ *   All three guards are active simultaneously for the critical section.
  */
 @Slf4j
 @RestController
 @RequiredArgsConstructor
 public class TransactionController {
 
-    private final LedgerService ledgerService;
+    private final LedgerService          ledgerService;
+    private final DistributedLockService lockService;
 
     // ── Transfer ──────────────────────────────────────────────────────────────
 
@@ -43,8 +60,17 @@ public class TransactionController {
             @AuthenticationPrincipal UserDetails principal) {
 
         log.info("POST /transactions/transfer user='{}'", principal.getUsername());
-        TransactionResponse.Detail response =
-                ledgerService.transfer(request, principal.getUsername());
+
+        // Acquire distributed lock HERE — outside LedgerService —
+        // so that ledgerService.transfer() is called through the Spring
+        // proxy and @Transactional takes effect correctly.
+        String lockKey = DistributedLockService.transferLockKey(
+                request.getSourceAccountNumber(),
+                request.getDestinationAccountNumber());
+
+        TransactionResponse.Detail response = lockService.executeWithLock(lockKey,
+                () -> ledgerService.transfer(request, principal.getUsername()));
+
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
@@ -72,11 +98,6 @@ public class TransactionController {
                 ledgerService.getTransactionById(id, principal.getUsername()));
     }
 
-    /**
-     * Paginated transaction list for an account.
-     * Default: 20 per page, newest first.
-     * Use ?page=1&size=10&sort=createdAt,desc to customise.
-     */
     @GetMapping("/accounts/{accountNumber}/transactions")
     public ResponseEntity<Page<TransactionResponse.Summary>> getTransactions(
             @PathVariable String accountNumber,
@@ -91,10 +112,6 @@ public class TransactionController {
                         accountNumber, principal.getUsername(), pageable));
     }
 
-    /**
-     * Paginated ledger statement — raw DEBIT/CREDIT entries for an account.
-     * This is what powers an account statement or mini-statement feature.
-     */
     @GetMapping("/accounts/{accountNumber}/statement")
     public ResponseEntity<Page<LedgerEntryResponse>> getStatement(
             @PathVariable String accountNumber,

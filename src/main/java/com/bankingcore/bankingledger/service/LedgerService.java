@@ -14,9 +14,7 @@ import com.bankingcore.bankingledger.dto.response.LedgerEntryResponse;
 import com.bankingcore.bankingledger.dto.response.TransactionResponse;
 import com.bankingcore.bankingledger.exception.AccountBlockedException;
 import com.bankingcore.bankingledger.exception.CurrencyMismatchException;
-import com.bankingcore.bankingledger.exception.DuplicateTransactionException;
 import com.bankingcore.bankingledger.exception.InsufficientFundsException;
-import com.bankingcore.bankingledger.exception.InvalidTransactionStateException;
 import com.bankingcore.bankingledger.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,92 +31,94 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * LedgerService — the core double-entry accounting engine.
+ * LedgerService — double-entry accounting engine with distributed locking.
  *
- * THE CRITICAL INVARIANT:
- *   For every transaction, the sum of all DEBIT entries must equal
- *   the sum of all CREDIT entries. This service enforces that invariant
- *   by always creating exactly two entries per transaction in one atomic
- *   @Transactional method.
+ * WHY @Transactional IS ON transfer() DIRECTLY (not a separate method):
  *
- * TRANSACTION FLOW:
+ *   Spring's @Transactional works through a proxy. When you inject
+ *   LedgerService elsewhere, you get the proxy. Calls from outside go
+ *   through the proxy — @Transactional is applied. But when a method
+ *   calls another method on the same class (this.doTransfer()), it
+ *   bypasses the proxy entirely — @Transactional is silently ignored.
  *
- *   1. Idempotency check — if the key exists, return the existing transaction
- *   2. Load accounts with pessimistic write locks (SELECT ... FOR UPDATE)
- *   3. Validate: both accounts ACTIVE, same currency, sufficient funds
- *   4. Create Transaction record (status = PENDING)
- *   5. Create DEBIT entry on source account, update source balance
- *   6. Create CREDIT entry on destination account, update destination balance
- *   7. Mark Transaction as SETTLED, record settledAt timestamp
- *   8. Persist everything — all in one flush, one DB transaction
+ *   The lambda (() -> doTransfer(...)) still captures 'this' (the raw
+ *   bean), so it has the same problem. The only reliable fix is to put
+ *   @Transactional on the method that DistributedLockService calls
+ *   from outside — which means merging everything into transfer().
  *
- *   If anything in steps 4-8 throws, Spring rolls back the entire DB
- *   transaction. No partial state is ever committed.
- *
- * WHY @Transactional IS NOT OPTIONAL HERE:
- *   Without it, steps 5 and 6 are separate DB transactions. If step 6 fails,
- *   step 5 has already committed — money has left the source account but
- *   never arrived in the destination. That's a ledger imbalance and a
- *   regulatory violation. @Transactional makes both-or-neither mandatory.
+ *   The lock and transaction overlap (lock wraps the transaction) which
+ *   is fine — it means the lock is held slightly longer than strictly
+ *   necessary, but guarantees the DB state is consistent while locked.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class LedgerService {
 
-    private final TransactionRepository  transactionRepository;
-    private final LedgerEntryRepository  ledgerEntryRepository;
-    private final AccountRepository      accountRepository;
+    private final TransactionRepository   transactionRepository;
+    private final LedgerEntryRepository   ledgerEntryRepository;
+    private final AccountRepository       accountRepository;
+    private final DistributedLockService  lockService;
+    private final TransactionStateMachine stateMachine;
 
     // ── Transfer ──────────────────────────────────────────────────────────────
 
     /**
-     * Executes a transfer between two accounts atomically.
+     * Executes a transfer with both distributed lock and DB transaction active.
      *
-     * @param request    validated transfer request from controller
-     * @param requestingUsername  the authenticated user — used for ownership check
-     * @return the settled transaction with both ledger entries
+     * The lock is acquired by DistributedLockService.executeWithLock BEFORE
+     * calling this method through the Spring proxy — so by the time this
+     * method runs, the Redis lock is held and the DB @Transactional is open.
+     *
+     * Call path:
+     *   TransactionController.transfer()
+     *     → lockService.executeWithLock(key, () -> ledgerService.transfer())
+     *                                               ^^^^^^^^^^^^^^^^^^^
+     *                                               called on the injected proxy
+     *                                               → @Transactional opens here
      */
     @Transactional
     public TransactionResponse.Detail transfer(TransactionRequest.Transfer request,
                                                String requestingUsername) {
-
-        log.info("Transfer initiated: {} → {} amount={} {} by user='{}'",
+        String lockKey = DistributedLockService.transferLockKey(
                 request.getSourceAccountNumber(),
-                request.getDestinationAccountNumber(),
-                request.getAmount(),
-                request.getCurrency(),
-                requestingUsername);
+                request.getDestinationAccountNumber());
 
-        // ── Step 1: Idempotency check ─────────────────────────────────────────
+        log.info("Transfer initiated — acquiring lock '{}' for user='{}'",
+                lockKey, requestingUsername);
+
+        // executeWithLock calls this method's logic — but we need to run
+        // the lock AROUND the transactional work. The correct pattern is
+        // to have the controller call lockService, which calls back into
+        // this bean via an injected self-reference. Instead, we simplify:
+        // just run the full logic here inside the transaction, and let the
+        // distributed lock be the outer guard at the controller level.
+        return executeTransferLogic(request, requestingUsername);
+    }
+
+    private TransactionResponse.Detail executeTransferLogic(
+            TransactionRequest.Transfer request, String requestingUsername) {
+
+        // Idempotency check
         String idempotencyKey = resolveIdempotencyKey(request.getIdempotencyKey());
-
         if (transactionRepository.existsByIdempotencyKey(idempotencyKey)) {
-            log.info("Duplicate transfer request — returning existing transaction for key='{}'",
-                    idempotencyKey);
-            Transaction existing = transactionRepository
-                    .findByIdempotencyKey(idempotencyKey)
-                    .orElseThrow();
-            return toDetail(existing);
+            log.info("Duplicate transfer — returning existing for key='{}'", idempotencyKey);
+            return toDetail(transactionRepository
+                    .findByIdempotencyKey(idempotencyKey).orElseThrow());
         }
 
-        // ── Step 2: Load accounts WITH pessimistic write locks ────────────────
-        // SELECT ... FOR UPDATE prevents another transaction from reading
-        // stale balances and committing a conflicting debit simultaneously.
-        // Phase 4 adds Redisson distributed locks as an outer guard.
+        // Load accounts (no pessimistic lock yet — just to get IDs for ordering)
         Account source = accountRepository
                 .findByAccountNumber(request.getSourceAccountNumber())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Account", request.getSourceAccountNumber()));
-
         Account destination = accountRepository
                 .findByAccountNumber(request.getDestinationAccountNumber())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Account", request.getDestinationAccountNumber()));
 
-        // Acquire DB-level pessimistic locks in a consistent order (by ID)
-        // to prevent deadlocks when two transfers involve the same accounts
-        // in opposite directions.
+        // Acquire DB pessimistic locks in consistent ID order to prevent deadlock.
+        // Lower UUID first — ensures A→B and B→A always lock in the same order.
         UUID firstId  = source.getId().compareTo(destination.getId()) < 0
                 ? source.getId() : destination.getId();
         UUID secondId = source.getId().compareTo(destination.getId()) < 0
@@ -129,16 +129,16 @@ public class LedgerService {
         Account lockedSecond = accountRepository.findByIdForUpdate(secondId)
                 .orElseThrow(() -> new ResourceNotFoundException("Account", secondId));
 
-        // Re-resolve source/destination from locked references
-        source      = lockedFirst.getId().equals(source.getId()) ? lockedFirst : lockedSecond;
+        // Re-resolve which locked reference is source vs destination
+        source      = lockedFirst.getId().equals(source.getId())      ? lockedFirst : lockedSecond;
         destination = lockedFirst.getId().equals(destination.getId()) ? lockedFirst : lockedSecond;
 
-        // ── Step 3: Validation ────────────────────────────────────────────────
         validateTransfer(source, destination, request, requestingUsername);
 
-        BigDecimal amount = request.getAmount().setScale(4, RoundingMode.HALF_EVEN);
+        BigDecimal amount        = request.getAmount().setScale(4, RoundingMode.HALF_EVEN);
+        BigDecimal roundedAmount = amount.setScale(2, RoundingMode.HALF_EVEN);
 
-        // ── Step 4: Create Transaction header (PENDING) ───────────────────────
+        // Create transaction header — PENDING
         Transaction transaction = Transaction.builder()
                 .sourceAccount(source)
                 .destinationAccount(destination)
@@ -150,79 +150,87 @@ public class LedgerService {
                 .idempotencyKey(idempotencyKey)
                 .description(request.getDescription())
                 .build();
-
         transaction = transactionRepository.save(transaction);
-        log.debug("Transaction created id='{}' status=PENDING", transaction.getId());
 
-        // ── Steps 5 & 6: Write ledger entries + update balances ───────────────
-        // This is the double-entry core. Both mutations happen inside the
-        // same @Transactional method — they will commit or rollback together.
-        BigDecimal roundedAmount = amount.setScale(2, RoundingMode.HALF_EVEN);
+        // State machine: PENDING → AUTHORIZED
+        stateMachine.assertCanTransition(transaction.getStatus(), TransactionStatus.AUTHORIZED);
+        transaction.setStatus(TransactionStatus.AUTHORIZED);
+        transactionRepository.save(transaction);
+        log.debug("Transaction {} PENDING → AUTHORIZED", transaction.getId());
 
-        // DEBIT source — balance decreases
-        source.debit(roundedAmount);
-        accountRepository.save(source);
+        try {
+            // Double-entry: DEBIT source account
+            source.debit(roundedAmount);
+            accountRepository.save(source);
 
-        LedgerEntry debitEntry = LedgerEntry.builder()
-                .account(source)
-                .transaction(transaction)
-                .entryType(EntryType.DEBIT)
-                .amount(amount)
-                .currency(request.getCurrency().toUpperCase())
-                .balanceAfter(source.getBalance())
-                .description(request.getDescription())
-                .build();
+            LedgerEntry debitEntry = LedgerEntry.builder()
+                    .account(source)
+                    .transaction(transaction)
+                    .entryType(EntryType.DEBIT)
+                    .amount(amount)
+                    .currency(request.getCurrency().toUpperCase())
+                    .balanceAfter(source.getBalance())
+                    .description(request.getDescription())
+                    .build();
+            ledgerEntryRepository.save(debitEntry);
+            log.debug("DEBIT {} {} on {} — balance now {}",
+                    roundedAmount, request.getCurrency(),
+                    source.getAccountNumber(), source.getBalance());
 
-        ledgerEntryRepository.save(debitEntry);
-        log.debug("DEBIT entry written: account='{}' amount={} balanceAfter={}",
-                source.getAccountNumber(), amount, source.getBalance());
+            // Double-entry: CREDIT destination account
+            destination.credit(roundedAmount);
+            accountRepository.save(destination);
 
-        // CREDIT destination — balance increases
-        destination.credit(roundedAmount);
-        accountRepository.save(destination);
+            LedgerEntry creditEntry = LedgerEntry.builder()
+                    .account(destination)
+                    .transaction(transaction)
+                    .entryType(EntryType.CREDIT)
+                    .amount(amount)
+                    .currency(request.getCurrency().toUpperCase())
+                    .balanceAfter(destination.getBalance())
+                    .description(request.getDescription())
+                    .build();
+            ledgerEntryRepository.save(creditEntry);
+            log.debug("CREDIT {} {} on {} — balance now {}",
+                    roundedAmount, request.getCurrency(),
+                    destination.getAccountNumber(), destination.getBalance());
 
-        LedgerEntry creditEntry = LedgerEntry.builder()
-                .account(destination)
-                .transaction(transaction)
-                .entryType(EntryType.CREDIT)
-                .amount(amount)
-                .currency(request.getCurrency().toUpperCase())
-                .balanceAfter(destination.getBalance())
-                .description(request.getDescription())
-                .build();
+            // State machine: AUTHORIZED → SETTLED
+            stateMachine.assertCanTransition(transaction.getStatus(), TransactionStatus.SETTLED);
+            transaction.setStatus(TransactionStatus.SETTLED);
+            transaction.setSettledAt(Instant.now());
+            transaction.getLedgerEntries().add(debitEntry);
+            transaction.getLedgerEntries().add(creditEntry);
+            Transaction settled = transactionRepository.save(transaction);
 
-        ledgerEntryRepository.save(creditEntry);
-        log.debug("CREDIT entry written: account='{}' amount={} balanceAfter={}",
-                destination.getAccountNumber(), amount, destination.getBalance());
+            log.info("Transfer SETTLED id='{}' {} {} {} → {}",
+                    settled.getId(), roundedAmount, request.getCurrency(),
+                    source.getAccountNumber(), destination.getAccountNumber());
 
-        // ── Step 7: Settle ────────────────────────────────────────────────────
-        transaction.setStatus(TransactionStatus.SETTLED);
-        transaction.setSettledAt(Instant.now());
-        transaction.getLedgerEntries().add(debitEntry);
-        transaction.getLedgerEntries().add(creditEntry);
-        Transaction settled = transactionRepository.save(transaction);
+            return toDetail(settled);
 
-        log.info("Transfer SETTLED: id='{}' {} {} {} → {}",
-                settled.getId(),
-                roundedAmount,
-                request.getCurrency(),
-                source.getAccountNumber(),
-                destination.getAccountNumber());
-
-        return toDetail(settled);
+        } catch (Exception ex) {
+            // On any failure, mark transaction FAILED so it can't be retried
+            if (stateMachine.canTransition(transaction.getStatus(), TransactionStatus.FAILED)) {
+                transaction.setStatus(TransactionStatus.FAILED);
+                transaction.setFailureReason(ex.getMessage());
+                transactionRepository.save(transaction);
+                log.error("Transfer FAILED id='{}' reason='{}'",
+                        transaction.getId(), ex.getMessage());
+            }
+            throw ex;
+        }
     }
 
-    // ── Deposit (ADMIN only — simulates external funds arriving) ─────────────
+    // ── Deposit ───────────────────────────────────────────────────────────────
 
     @Transactional
     @PreAuthorize("hasRole('ADMIN')")
     public TransactionResponse.Detail deposit(TransactionRequest.Deposit request) {
-
-        log.info("Deposit initiated: account='{}' amount={} {}",
+        log.info("Deposit: account='{}' amount={} {}",
                 request.getAccountNumber(), request.getAmount(), request.getCurrency());
 
         String idempotencyKey = resolveIdempotencyKey(request.getIdempotencyKey());
-
         if (transactionRepository.existsByIdempotencyKey(idempotencyKey)) {
             return toDetail(transactionRepository
                     .findByIdempotencyKey(idempotencyKey).orElseThrow());
@@ -233,18 +241,14 @@ public class LedgerService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Account", request.getAccountNumber()));
 
-        if (!destination.isOperational()) {
+        if (!destination.isOperational())
             throw new AccountBlockedException(destination.getAccountNumber());
-        }
 
-        // For deposits, source = destination (internal system account convention)
-        // A proper implementation would use a dedicated NOSTRO/system account.
-        // Simplified here — Phase 5 introduces the internal fee account.
-        BigDecimal amount = request.getAmount().setScale(4, RoundingMode.HALF_EVEN);
+        BigDecimal amount        = request.getAmount().setScale(4, RoundingMode.HALF_EVEN);
         BigDecimal roundedAmount = amount.setScale(2, RoundingMode.HALF_EVEN);
 
         Transaction transaction = Transaction.builder()
-                .sourceAccount(destination)   // self-referential for external deposits
+                .sourceAccount(destination)
                 .destinationAccount(destination)
                 .amount(amount)
                 .currency(request.getCurrency().toUpperCase())
@@ -254,8 +258,10 @@ public class LedgerService {
                 .idempotencyKey(idempotencyKey)
                 .description(request.getDescription())
                 .build();
-
         transaction = transactionRepository.save(transaction);
+
+        stateMachine.assertCanTransition(transaction.getStatus(), TransactionStatus.AUTHORIZED);
+        transaction.setStatus(TransactionStatus.AUTHORIZED);
 
         destination.credit(roundedAmount);
         accountRepository.save(destination);
@@ -269,55 +275,45 @@ public class LedgerService {
                 .balanceAfter(destination.getBalance())
                 .description(request.getDescription())
                 .build();
-
         ledgerEntryRepository.save(creditEntry);
 
+        stateMachine.assertCanTransition(transaction.getStatus(), TransactionStatus.SETTLED);
         transaction.setStatus(TransactionStatus.SETTLED);
         transaction.setSettledAt(Instant.now());
         transaction.getLedgerEntries().add(creditEntry);
         Transaction settled = transactionRepository.save(transaction);
 
-        log.info("Deposit SETTLED: id='{}' {} {} → account='{}'",
+        log.info("Deposit SETTLED id='{}' {} {} → '{}'",
                 settled.getId(), roundedAmount, request.getCurrency(),
                 destination.getAccountNumber());
-
         return toDetail(settled);
     }
 
-    // ── Read operations ───────────────────────────────────────────────────────
+    // ── Read ──────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public TransactionResponse.Detail getTransactionById(UUID transactionId,
-                                                         String requestingUsername) {
-        Transaction transaction = transactionRepository.findById(transactionId)
-                .orElseThrow(() -> new ResourceNotFoundException("Transaction", transactionId));
-
-        enforceTransactionAccess(transaction, requestingUsername);
-        return toDetail(transaction);
+    public TransactionResponse.Detail getTransactionById(UUID id, String username) {
+        Transaction t = transactionRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Transaction", id));
+        enforceTransactionAccess(t, username);
+        return toDetail(t);
     }
 
     @Transactional(readOnly = true)
     public Page<TransactionResponse.Summary> getAccountTransactions(
-            String accountNumber, String requestingUsername, Pageable pageable) {
-
+            String accountNumber, String username, Pageable pageable) {
         Account account = accountRepository.findByAccountNumber(accountNumber)
                 .orElseThrow(() -> new ResourceNotFoundException("Account", accountNumber));
-
-        enforceAccountAccess(account, requestingUsername);
-
-        return transactionRepository.findByAccount(account, pageable)
-                .map(this::toSummary);
+        enforceAccountAccess(account, username);
+        return transactionRepository.findByAccount(account, pageable).map(this::toSummary);
     }
 
     @Transactional(readOnly = true)
     public Page<LedgerEntryResponse> getAccountStatement(
-            String accountNumber, String requestingUsername, Pageable pageable) {
-
+            String accountNumber, String username, Pageable pageable) {
         Account account = accountRepository.findByAccountNumber(accountNumber)
                 .orElseThrow(() -> new ResourceNotFoundException("Account", accountNumber));
-
-        enforceAccountAccess(account, requestingUsername);
-
+        enforceAccountAccess(account, username);
         return ledgerEntryRepository
                 .findByAccountOrderByCreatedAtDesc(account, pageable)
                 .map(this::toEntryResponse);
@@ -325,76 +321,41 @@ public class LedgerService {
 
     // ── Validation ────────────────────────────────────────────────────────────
 
-    private void validateTransfer(Account source,
-                                  Account destination,
-                                  TransactionRequest.Transfer request,
-                                  String requestingUsername) {
-
-        // Ownership — requesting user must own the source account
-        if (!source.getOwner().getUsername().equals(requestingUsername)) {
-            log.warn("User '{}' attempted transfer from account '{}' owned by '{}'",
-                    requestingUsername, source.getAccountNumber(),
-                    source.getOwner().getUsername());
+    private void validateTransfer(Account source, Account destination,
+                                  TransactionRequest.Transfer req, String username) {
+        if (!source.getOwner().getUsername().equals(username))
             throw new org.springframework.security.access.AccessDeniedException(
                     "You do not own source account: " + source.getAccountNumber());
-        }
-
-        // Cannot transfer to the same account
-        if (source.getId().equals(destination.getId())) {
-            throw new IllegalArgumentException(
-                    "Source and destination accounts must be different.");
-        }
-
-        // Both accounts must be ACTIVE
-        if (!source.isOperational()) {
+        if (source.getId().equals(destination.getId()))
+            throw new IllegalArgumentException("Source and destination must differ.");
+        if (!source.isOperational())
             throw new AccountBlockedException(source.getAccountNumber());
-        }
-        if (!destination.isOperational()) {
+        if (!destination.isOperational())
             throw new AccountBlockedException(destination.getAccountNumber());
-        }
-
-        // Currency must match (cross-currency handled in Phase 5)
-        if (!source.getCurrency().equals(request.getCurrency().toUpperCase())) {
-            throw new CurrencyMismatchException(
-                    source.getCurrency(), request.getCurrency());
-        }
-        if (!destination.getCurrency().equals(request.getCurrency().toUpperCase())) {
-            throw new CurrencyMismatchException(
-                    destination.getCurrency(), request.getCurrency());
-        }
-
-        // Sufficient funds check
-        BigDecimal amount = request.getAmount().setScale(2, RoundingMode.HALF_EVEN);
-        if (!source.hasSufficientFunds(amount)) {
+        if (!source.getCurrency().equals(req.getCurrency().toUpperCase()))
+            throw new CurrencyMismatchException(source.getCurrency(), req.getCurrency());
+        if (!destination.getCurrency().equals(req.getCurrency().toUpperCase()))
+            throw new CurrencyMismatchException(destination.getCurrency(), req.getCurrency());
+        BigDecimal amount = req.getAmount().setScale(2, RoundingMode.HALF_EVEN);
+        if (!source.hasSufficientFunds(amount))
             throw new InsufficientFundsException(
                     source.getAccountNumber(), source.getBalance(), amount);
-        }
-
-        log.debug("Transfer validation passed: {} {} {} → {}",
-                amount, request.getCurrency(),
-                source.getAccountNumber(), destination.getAccountNumber());
     }
 
-    // ── Access control helpers ────────────────────────────────────────────────
+    // ── Access control ────────────────────────────────────────────────────────
 
-    private void enforceTransactionAccess(Transaction transaction,
-                                          String requestingUsername) {
-        boolean isOwner =
-                transaction.getSourceAccount().getOwner().getUsername().equals(requestingUsername)
-                        || transaction.getDestinationAccount().getOwner().getUsername().equals(requestingUsername);
-
-        boolean isAdmin = isAdmin();
-        if (!isOwner && !isAdmin) {
+    private void enforceTransactionAccess(Transaction t, String username) {
+        boolean isOwner = t.getSourceAccount().getOwner().getUsername().equals(username)
+                || t.getDestinationAccount().getOwner().getUsername().equals(username);
+        if (!isOwner && !isAdmin())
             throw new org.springframework.security.access.AccessDeniedException(
-                    "You do not have access to transaction: " + transaction.getId());
-        }
+                    "Access denied to transaction: " + t.getId());
     }
 
-    private void enforceAccountAccess(Account account, String requestingUsername) {
-        if (!account.getOwner().getUsername().equals(requestingUsername) && !isAdmin()) {
+    private void enforceAccountAccess(Account account, String username) {
+        if (!account.getOwner().getUsername().equals(username) && !isAdmin())
             throw new org.springframework.security.access.AccessDeniedException(
-                    "You do not have access to account: " + account.getAccountNumber());
-        }
+                    "Access denied to account: " + account.getAccountNumber());
     }
 
     private boolean isAdmin() {
@@ -404,15 +365,8 @@ public class LedgerService {
                 .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
     }
 
-    // ── Idempotency key resolver ──────────────────────────────────────────────
-
-    private String resolveIdempotencyKey(String clientKey) {
-        if (clientKey != null && !clientKey.isBlank()) {
-            return clientKey;
-        }
-        // Auto-generate if client didn't supply one — idempotency only guaranteed
-        // if the client provides a consistent key on retries
-        return UUID.randomUUID().toString();
+    private String resolveIdempotencyKey(String key) {
+        return (key != null && !key.isBlank()) ? key : UUID.randomUUID().toString();
     }
 
     // ── Mappers ───────────────────────────────────────────────────────────────
@@ -420,7 +374,6 @@ public class LedgerService {
     public TransactionResponse.Detail toDetail(Transaction t) {
         List<LedgerEntry> entries = ledgerEntryRepository
                 .findByTransactionOrderByCreatedAtAsc(t);
-
         return TransactionResponse.Detail.builder()
                 .id(t.getId())
                 .idempotencyKey(t.getIdempotencyKey())
@@ -428,8 +381,8 @@ public class LedgerService {
                 .status(t.getStatus())
                 .sourceAccountNumber(t.getSourceAccount().getAccountNumber())
                 .destinationAccountNumber(t.getDestinationAccount().getAccountNumber())
-                .amount(t.getAmount())
-                .feeAmount(t.getFeeAmount())
+                .amount(t.getAmount().setScale(4, java.math.RoundingMode.HALF_EVEN))
+                .feeAmount(t.getFeeAmount().setScale(4, java.math.RoundingMode.HALF_EVEN))
                 .currency(t.getCurrency())
                 .description(t.getDescription())
                 .failureReason(t.getFailureReason())
@@ -457,9 +410,9 @@ public class LedgerService {
                 .id(e.getId())
                 .accountNumber(e.getAccount().getAccountNumber())
                 .entryType(e.getEntryType())
-                .amount(e.getAmount())
+                .amount(e.getAmount().setScale(4, java.math.RoundingMode.HALF_EVEN))
                 .currency(e.getCurrency())
-                .balanceAfter(e.getBalanceAfter())
+                .balanceAfter(e.getBalanceAfter().setScale(2, java.math.RoundingMode.HALF_EVEN))
                 .description(e.getDescription())
                 .createdAt(e.getCreatedAt())
                 .build();

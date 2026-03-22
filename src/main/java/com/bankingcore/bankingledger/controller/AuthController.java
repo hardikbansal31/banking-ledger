@@ -8,21 +8,20 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * AuthController — handles authentication endpoints.
+ * AuthController — authentication endpoints.
  *
- * All endpoints here are permitAll() in SecurityConfig — no JWT required.
+ * POST /auth/register → 201 Created
+ * POST /auth/login    → 200 OK
+ * POST /auth/refresh  → 200 OK
+ * POST /auth/logout   → 204 No Content  (blacklists the token in Redis)
  *
- * REST conventions used:
- *  POST /auth/register → 201 Created  (new resource created)
- *  POST /auth/login    → 200 OK       (returning existing resource state)
- *  POST /auth/refresh  → 200 OK       (exchange, not creation)
- *
- * @Valid triggers Bean Validation on the request body.
- * Validation failures throw MethodArgumentNotValidException →
- * caught by GlobalExceptionHandler → 422 with field errors.
+ * register/login/refresh are permitAll() in SecurityConfig.
+ * logout requires a valid token — you must be authenticated to log out.
  */
 @Slf4j
 @RestController
@@ -36,18 +35,17 @@ public class AuthController {
     public ResponseEntity<AuthResponse.TokenPair> register(
             @Valid @RequestBody AuthRequest.Register request) {
 
-        log.info("POST /auth/register for username='{}'", request.getUsername());
-        AuthResponse.TokenPair response = authService.register(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        log.info("POST /auth/register username='{}'", request.getUsername());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(authService.register(request));
     }
 
     @PostMapping("/login")
     public ResponseEntity<AuthResponse.TokenPair> login(
             @Valid @RequestBody AuthRequest.Login request) {
 
-        log.info("POST /auth/login for username='{}'", request.getUsername());
-        AuthResponse.TokenPair response = authService.login(request);
-        return ResponseEntity.ok(response);
+        log.info("POST /auth/login username='{}'", request.getUsername());
+        return ResponseEntity.ok(authService.login(request));
     }
 
     @PostMapping("/refresh")
@@ -55,7 +53,24 @@ public class AuthController {
             @Valid @RequestBody AuthRequest.Refresh request) {
 
         log.debug("POST /auth/refresh");
-        AuthResponse.TokenPair response = authService.refresh(request);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(authService.refresh(request));
+    }
+
+    /**
+     * Logout — blacklists the current access token in Redis.
+     * After this call, the token is rejected by JwtAuthenticationFilter
+     * even if it hasn't expired yet.
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(
+            @RequestHeader("Authorization") String authHeader,
+            @AuthenticationPrincipal UserDetails principal) {
+
+        log.info("POST /auth/logout username='{}'", principal.getUsername());
+        String token = authHeader.startsWith("Bearer ")
+                ? authHeader.substring(7)
+                : authHeader;
+        authService.logout(token);
+        return ResponseEntity.noContent().build();
     }
 }

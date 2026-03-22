@@ -1,6 +1,7 @@
 package com.bankingcore.bankingledger.service;
 
 import com.bankingcore.bankingledger.config.JwtProperties;
+import com.bankingcore.bankingledger.service.TokenBlacklistService;
 import com.bankingcore.bankingledger.domain.entity.User;
 import com.bankingcore.bankingledger.domain.enums.Role;
 import com.bankingcore.bankingledger.domain.repository.UserRepository;
@@ -47,6 +48,7 @@ public class AuthService {
     private final JwtService           jwtService;
     private final JwtProperties        jwtProperties;
     private final AuthenticationManager authenticationManager;
+    private final TokenBlacklistService tokenBlacklistService;
 
     // ── Register ──────────────────────────────────────────────────────────────
 
@@ -158,6 +160,28 @@ public class AuthService {
                 .expiresIn(jwtProperties.getExpirationMs() / 1000)
                 .user(toUserSummary(user))
                 .build();
+    }
+
+
+    // ── Logout ────────────────────────────────────────────────────────────────
+
+    /**
+     * Revokes the provided access token by adding it to the Redis blacklist.
+     * The token remains in Redis until its natural expiry, after which Redis
+     * auto-deletes it (TTL-based cleanup — no manual purge needed).
+     */
+    @Transactional(readOnly = true)
+    public void logout(String rawToken) {
+        try {
+            java.util.Date expiresAt = jwtService.extractClaim(rawToken,
+                    io.jsonwebtoken.Claims::getExpiration);
+            tokenBlacklistService.blacklist(rawToken, expiresAt);
+            log.info("User logged out — token blacklisted until expiry");
+        } catch (Exception ex) {
+            // Token may already be expired — still a successful logout
+            log.warn("Logout: could not extract expiry from token (may already be expired): {}",
+                    ex.getMessage());
+        }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
