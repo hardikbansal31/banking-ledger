@@ -9,11 +9,11 @@ import { Toaster } from "react-hot-toast";
 import { useAuthStore } from "./store/authStore";
 import Sidebar from "./components/Sidebar";
 import Login from "./pages/Login";
-// import Dashboard from "./pages/Dashboard";
-// import Accounts from "./pages/Accounts";
-// import Transfer from "./pages/Transfer";
-// import Statement from "./pages/Statement";
-// import Scheduled from "./pages/Scheduled";
+import Dashboard from "./pages/Dashboard";
+import Accounts from "./pages/Accounts";
+import Transfer from "./pages/Transfer";
+import Statement from "./pages/Statement";
+import Scheduled from "./pages/Scheduled";
 
 /**
  * ProtectedLayout — wraps all authenticated pages.
@@ -80,11 +80,11 @@ export default function App() {
 
         {/* Protected */}
         <Route element={<ProtectedLayout />}>
-          {/* <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/accounts" element={<Accounts />} />
           <Route path="/transfer" element={<Transfer />} />
           <Route path="/statement" element={<Statement />} />
-          <Route path="/scheduled" element={<Scheduled />} /> */}
+          <Route path="/scheduled" element={<Scheduled />} />
         </Route>
 
         {/* Catch-all */}
