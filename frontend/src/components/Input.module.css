@@ -1,0 +1,92 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.required {
+  color: var(--color-debit);
+  margin-left: 3px;
+}
+
+.inputWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  transition: border-color var(--transition-fast),
+              box-shadow var(--transition-fast);
+}
+
+.inputWrap:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.12);
+  outline: none;
+}
+
+.hasError {
+  border-color: var(--color-debit) !important;
+}
+.hasError:focus-within {
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12) !important;
+}
+
+.input {
+  flex: 1;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 0.9375rem;
+  border-radius: var(--radius-md);
+  outline: none;
+  width: 100%;
+}
+
+.input::placeholder {
+  color: var(--color-text-secondary);
+  opacity: 0.7;
+}
+
+.input:disabled {
+  color: var(--color-text-secondary);
+  cursor: not-allowed;
+}
+
+.withIcon  { padding-left: 10px; }
+.withSuffix { padding-right: 10px; }
+
+.icon {
+  padding-left: 12px;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.suffix {
+  padding-right: 12px;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.error {
+  font-size: 0.8125rem;
+  color: var(--color-debit);
+}
+
+.hint {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}

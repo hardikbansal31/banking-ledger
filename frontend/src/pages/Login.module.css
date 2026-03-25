@@ -1,0 +1,171 @@
+.page {
+  display: flex;
+  min-height: 100vh;
+  background: var(--color-bg-page);
+}
+
+/* ── Left branding panel ─────────────────────────────── */
+.panel {
+  width: 45%;
+  background: var(--color-bg-dark);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 60px;
+}
+
+@media (max-width: 900px) {
+  .panel {
+    display: none;
+  }
+  .formSide {
+    width: 100%;
+  }
+}
+
+.panelContent {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.logo {
+  width: 52px;
+  height: 52px;
+  background: var(--color-primary);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+.headline {
+  font-size: 2.75rem;
+  line-height: 1.15;
+  color: #fff;
+  font-weight: 400;
+}
+
+.subline {
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.6;
+  max-width: 340px;
+}
+
+.features {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.feature {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.featureDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  flex-shrink: 0;
+}
+
+/* Decorative background element */
+.panelDecor {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse 80% 60% at 110% 80%,
+    rgba(249, 115, 22, 0.12) 0%,
+    transparent 60%
+  );
+  pointer-events: none;
+}
+
+/* ── Right form side ──────────────────────────────────── */
+.formSide {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+
+.formCard {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* ── Tabs ─────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+  gap: 2px;
+}
+
+.tab {
+  flex: 1;
+  padding: 9px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: var(--font-body);
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+}
+
+.tabActive {
+  background: var(--color-bg-card) !important;
+  color: var(--color-text-primary) !important;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Form ─────────────────────────────────────────────── */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.eyeBtn {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 1rem;
+  transition: color var(--transition-fast);
+}
+.eyeBtn:hover {
+  color: var(--color-text-primary);
+}
