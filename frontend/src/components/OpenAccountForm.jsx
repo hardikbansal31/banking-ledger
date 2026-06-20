@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Input from "./Input";
 import Button from "./Button";
+import Select from "./Select";
 import { useAccountStore } from "../store/accountStore";
 import styles from "./OpenAccountForm.module.css";
 
@@ -39,39 +40,19 @@ export default function OpenAccountForm({ onSuccess }) {
 
   return (
     <form onSubmit={handleSubmit} className={styles.form} noValidate>
-      {/* Account type selector */}
-      <div className={styles.field}>
-        <label className={styles.label}>Account type</label>
-        <div className={styles.typeGrid}>
-          {ACCOUNT_TYPES.map((type) => (
-            <button
-              key={type}
-              type="button"
-              className={`${styles.typeBtn} ${form.accountType === type ? styles.typeBtnActive : ""}`}
-              onClick={() => setForm({ ...form, accountType: type })}
-            >
-              {type}
-            </button>
-          ))}
-        </div>
-      </div>
+      <Select
+        label="Account type"
+        value={form.accountType}
+        onChange={(val) => setForm({ ...form, accountType: val })}
+        options={ACCOUNT_TYPES.map((t) => ({ value: t, label: t }))}
+      />
 
-      {/* Currency selector */}
-      <div className={styles.field}>
-        <label className={styles.label}>Currency</label>
-        <div className={styles.currencyGrid}>
-          {CURRENCIES.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className={`${styles.currencyBtn} ${form.currency === c ? styles.currencyBtnActive : ""}`}
-              onClick={() => setForm({ ...form, currency: c })}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-      </div>
+      <Select
+        label="Currency"
+        value={form.currency}
+        onChange={(val) => setForm({ ...form, currency: val })}
+        options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+      />
 
       <Input
         label="Initial deposit (optional)"

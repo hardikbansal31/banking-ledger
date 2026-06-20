@@ -36,7 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
  * Refresh flow:
  *   1. Extract username from refresh token (validates signature + expiry)
  *   2. Load UserDetails
- *   3. Issue new access token (refresh token reuse — rotate in Phase 4)
+ *   3. Issue new access token (refresh token reuse)
  */
 @Slf4j
 @Service
@@ -150,7 +150,7 @@ public class AuthService {
         }
 
         log.info("Token refreshed for username='{}'", username);
-        // Issue a fresh access token; keep the same refresh token (rotation in Phase 4)
+        // Issue a fresh access token; keep the same refresh token
         String newAccessToken = jwtService.generateAccessToken(user);
 
         return AuthResponse.TokenPair.builder()

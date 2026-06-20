@@ -6,6 +6,7 @@ import {
   RiDeleteBinLine,
   RiTimeLine,
   RiCheckLine,
+  RiArrowRightLine,
 } from "react-icons/ri";
 import { useAccountStore } from "../store/accountStore";
 import { scheduledApi } from "../api/scheduled";
@@ -15,6 +16,7 @@ import Badge from "../components/Badge";
 import Modal from "../components/Modal";
 import Input from "../components/Input";
 import { PageSpinner, EmptyState } from "../components/Spinner";
+import AccountSelect from "../components/AccountSelect";
 import styles from "./Scheduled.module.css";
 
 function fmt(amount, currency = "USD") {
@@ -107,60 +109,36 @@ function CreateScheduledForm({ accounts, onSuccess }) {
 
   return (
     <form onSubmit={handleSubmit} className={styles.createForm} noValidate>
-      {/* Source */}
-      <div className={styles.formField}>
-        <label className={styles.formLabel}>From account</label>
-        <select
-          className={`${styles.formSelect} ${errors.source ? styles.formSelectError : ""}`}
-          value={form.sourceAccountNumber}
-          onChange={(e) => {
-            const acc = accounts.find(
-              (a) => a.accountNumber === e.target.value,
-            );
-            setForm({
-              ...form,
-              sourceAccountNumber: e.target.value,
-              currency: acc?.currency || "USD",
-            });
-          }}
-        >
-          <option value="">Select account</option>
-          {activeAccounts
-            .filter((a) => a.accountNumber !== form.destinationAccountNumber)
-            .map((a) => (
-              <option key={a.id} value={a.accountNumber}>
-                {a.accountNumber} — {fmt(a.balance, a.currency)}
-              </option>
-            ))}
-        </select>
-        {errors.source && (
-          <span className={styles.fieldError}>{errors.source}</span>
-        )}
+      <AccountSelect
+        label="From account"
+        value={form.sourceAccountNumber}
+        onChange={(v) => {
+          const acc = accounts.find((a) => a.accountNumber === v);
+          setForm({
+            ...form,
+            sourceAccountNumber: v,
+            currency: acc?.currency || "USD",
+          });
+        }}
+        accounts={accounts}
+        exclude={form.destinationAccountNumber}
+        error={errors.source}
+      />
+
+      <div className={styles.exchangeIcon}>
+        <RiArrowRightLine size={20} />
       </div>
 
-      {/* Destination */}
-      <div className={styles.formField}>
-        <label className={styles.formLabel}>To account</label>
-        <select
-          className={`${styles.formSelect} ${errors.dest ? styles.formSelectError : ""}`}
-          value={form.destinationAccountNumber}
-          onChange={(e) =>
-            setForm({ ...form, destinationAccountNumber: e.target.value })
-          }
-        >
-          <option value="">Select account</option>
-          {activeAccounts
-            .filter((a) => a.accountNumber !== form.sourceAccountNumber)
-            .map((a) => (
-              <option key={a.id} value={a.accountNumber}>
-                {a.accountNumber} — {a.accountType}
-              </option>
-            ))}
-        </select>
-        {errors.dest && (
-          <span className={styles.fieldError}>{errors.dest}</span>
-        )}
-      </div>
+      <AccountSelect
+        label="To account"
+        value={form.destinationAccountNumber}
+        onChange={(v) => setForm({ ...form, destinationAccountNumber: v })}
+        accounts={accounts}
+        exclude={form.sourceAccountNumber}
+        error={errors.dest}
+      />
+
+      <div className={styles.divider} />
 
       <Input
         label="Amount"

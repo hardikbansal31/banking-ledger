@@ -3,7 +3,7 @@ package com.bankingcore.bankingledger.domain.enums;
 /**
  * TransactionStatus — states in the transaction lifecycle state machine.
  *
- * Legal transitions (enforced by TransactionStateMachine in Phase 4):
+ * Legal transitions (enforced by TransactionStateMachine):
  *
  *   PENDING → AUTHORIZED   : funds reserved, lock acquired
  *   PENDING → FAILED        : validation failed before authorization

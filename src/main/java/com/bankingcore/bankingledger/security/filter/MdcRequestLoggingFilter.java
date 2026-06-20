@@ -95,7 +95,7 @@ public class MdcRequestLoggingFilter extends OncePerRequestFilter {
     /**
      * Uses the X-Request-Id header if provided by a gateway/load balancer,
      * otherwise generates a fresh UUID. This enables end-to-end trace correlation
-     * when placed behind an API Gateway (Phase 6).
+     * when placed behind an API Gateway.
      */
     private String resolveRequestId(HttpServletRequest request) {
         String incoming = request.getHeader("X-Request-Id");

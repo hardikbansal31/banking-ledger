@@ -20,7 +20,7 @@ import java.math.BigDecimal;
  *   with two new entries in the opposite direction. You never modify history.
  *
  * The @PreUpdate guard enforces this in Java. The DB-level enforcement is the
- * absence of any UPDATE permission on this table in production (Phase 6).
+ * absence of any UPDATE permission on this table in production.
  *
  * balanceAfter:
  *   Stores the account balance AFTER this entry was applied.

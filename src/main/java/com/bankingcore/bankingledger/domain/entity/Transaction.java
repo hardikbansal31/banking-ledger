@@ -100,7 +100,7 @@ public class Transaction extends BaseEntity {
 
     /**
      * Fee charged for this transaction (if any). Zero by default.
-     * Populated by FeeEngine in Phase 5.
+     * Populated by FeeEngine.
      */
     @Column(name = "fee_amount", nullable = false, precision = 19, scale = 4)
     @Builder.Default

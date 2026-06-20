@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.net.URI;
 import java.time.Instant;
@@ -61,7 +62,8 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     // Problem type URI base — replace with your actual domain in production
-    private static final String PROBLEM_BASE_URI = "https://banking-ledger.io/errors/";
+    @Value("${app.error.base-uri:https://banking-ledger.io/errors/}")
+    private String problemBaseUri;
 
     // MDC key matching the pattern in application.yml
     private static final String MDC_REQUEST_ID = "requestId";
@@ -457,7 +459,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             WebRequest request) {
 
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
-        problem.setType(URI.create(PROBLEM_BASE_URI + errorSlug));
+        problem.setType(URI.create(problemBaseUri + errorSlug));
         problem.setTitle(title);
         problem.setInstance(URI.create(
                 request.getDescription(false).replace("uri=", "")));
@@ -467,7 +469,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     /**
-     * Extracts the request ID from the MDC (injected in Phase 6) or falls back
+     * Extracts the request ID from the MDC or falls back
      * to "n/a" so the field is always present in the JSON body.
      */
     private String getRequestId(WebRequest request) {

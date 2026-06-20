@@ -8,7 +8,7 @@ package com.bankingcore.bankingledger.domain.enums;
  * WITHDRAWAL   : money leaves the system (e.g. to external bank)
  * FEE          : platform fee charged — debit from user, credit to internal account
  * REVERSAL     : cancels a prior SETTLED transaction with opposite entries
- * SCHEDULED    : a TRANSFER triggered by a Quartz scheduled job (Phase 5)
+ * SCHEDULED    : a TRANSFER triggered by a Quartz scheduled job
  */
 public enum TransactionType {
     TRANSFER,

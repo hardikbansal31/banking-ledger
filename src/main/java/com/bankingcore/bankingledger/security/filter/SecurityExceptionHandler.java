@@ -13,6 +13,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -26,6 +27,9 @@ public class SecurityExceptionHandler
         implements AuthenticationEntryPoint, AccessDeniedHandler {
 
     private final ObjectMapper objectMapper;
+
+    @Value("${app.error.base-uri:https://banking-ledger.io/errors/}")
+    private String problemBaseUri;
 
     /** Called when request has NO valid credentials → 401 */
     @Override
@@ -73,7 +77,7 @@ public class SecurityExceptionHandler
         }
 
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
-        problem.setType(URI.create("https://banking-ledger.io/errors/" + slug));
+        problem.setType(URI.create(problemBaseUri + slug));
         problem.setTitle(title);
         problem.setInstance(URI.create(instance));
         problem.setProperty("timestamp", Instant.now().toString());

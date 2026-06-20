@@ -83,7 +83,7 @@ public class User extends BaseEntity implements UserDetails {
 
     /**
      * True after too many failed login attempts (brute-force protection).
-     * Set by a LoginAttemptService (Phase 6 enhancement).
+     * Set by a LoginAttemptService.
      */
     @Column(name = "account_non_locked", nullable = false)
     @Builder.Default

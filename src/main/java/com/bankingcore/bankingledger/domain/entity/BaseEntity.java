@@ -95,7 +95,7 @@ public abstract class BaseEntity implements Serializable {
     private Instant updatedAt;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Audit Principal  (populated by AuditorAware bean — wired in Phase 2)
+    // Audit Principal  (populated by AuditorAware bean)
     // ─────────────────────────────────────────────────────────────────────────
 
     /**

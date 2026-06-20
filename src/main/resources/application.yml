@@ -31,7 +31,7 @@ spring:
   # ─── JPA / Hibernate ───────────────────────────────────────────────────────
   jpa:
     hibernate:
-      # 'validate' in production — schema managed by Flyway/Liquibase (Phase 6)
+      # 'validate' in production — schema managed by Flyway/Liquibase
       # 'update' acceptable for early development phases
       ddl-auto: update
     show-sql: false   # enable per-profile below if needed
@@ -51,7 +51,7 @@ spring:
   data:
     redis:
       host: ${REDIS_HOST:localhost}
-      port: ${REDIS_HOST_PORT:6380}
+      port: ${REDIS_HOST_PORT:16379}
       password: ${REDIS_PASSWORD:MISSING_REDIS_PASSWORD}
       timeout: 3000ms
       lettuce:
@@ -113,7 +113,7 @@ app:
       expiration-ms: ${JWT_EXPIRATION_MS:3600000}
       refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:86400000}
     cors:
-      # Comma-separated allowed origins — consumed by CorsConfig bean (Phase 2)
+      # Comma-separated allowed origins
       allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
 
   # ─── Exchange Rate ─────────────────────────────────────────────────────────
@@ -133,7 +133,7 @@ app:
     tier-high-rate: "0.0050"   # 0.50 %
 
 # =============================================================================
-# Actuator — expose only required endpoints; lock down with security in Phase 6
+# Actuator — expose only required endpoints; lock down with security
 # =============================================================================
 management:
   endpoints:
@@ -183,7 +183,7 @@ logging:
     org.hibernate.SQL: WARN
     org.hibernate.type.descriptor.sql: WARN
   pattern:
-    # MDC keys (requestId, userId) are injected in Phase 6
+    # MDC keys (requestId, userId) are injected
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{requestId}] [%X{userId}] %logger{36} - %msg%n"
 
 ---

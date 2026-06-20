@@ -15,8 +15,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  *   @EnableAutoConfiguration — Spring Boot auto-wires based on classpath
  *   @ComponentScan       — scans com.bankingcore.bankingledger and sub-packages
  *
- * @EnableScheduling — activates @Scheduled annotations (needed for Phase 5 Quartz jobs)
- * @EnableAsync      — allows @Async methods (Phase 5 background tasks)
+ * @EnableScheduling — activates @Scheduled annotations (needed for Quartz jobs)
+ * @EnableAsync      — allows @Async methods (background tasks)
  * @EnableConfigurationProperties — activates @ConfigurationProperties beans
  *                                  (JwtProperties etc.)
  */
@@ -34,13 +34,14 @@ public class BankingLedgerApplication {
 		String port = context.getEnvironment().getProperty("server.port", "8080");
 		String ctx  = context.getEnvironment().getProperty("server.servlet.context-path", "");
 		String env  = context.getEnvironment().getProperty("spring.profiles.active", "default");
+		String appBaseUrl = context.getEnvironment().getProperty("app.base-url", "http://localhost");
 
 		log.info("═══════════════════════════════════════════════════");
 		log.info("  Banking Ledger started successfully");
 		log.info("  Environment : {}", env);
-		log.info("  Base URL    : http://localhost:{}{}", port, ctx);
-		log.info("  Auth        : http://localhost:{}{}/auth/register", port, ctx);
-		log.info("  Actuator    : http://localhost:{}{}/actuator/health", port, ctx);
+		log.info("  Base URL    : {}:{}{}", appBaseUrl, port, ctx);
+		log.info("  Auth        : {}:{}{}/auth/register", appBaseUrl, port, ctx);
+		log.info("  Actuator    : {}:{}{}/actuator/health", appBaseUrl, port, ctx);
 		log.info("═══════════════════════════════════════════════════");
 	}
 }

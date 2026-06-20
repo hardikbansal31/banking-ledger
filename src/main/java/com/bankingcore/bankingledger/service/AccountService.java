@@ -47,7 +47,7 @@ public class AccountService {
     /**
      * In-memory counter for account number generation.
      * In production: replace with a DB sequence or Redis INCR for cluster safety.
-     * Phase 4 Redisson integration will make this distributed.
+     * Redisson integration makes this distributed.
      */
     private final AtomicLong accountSequence = new AtomicLong(0);
 
@@ -80,7 +80,7 @@ public class AccountService {
                 .currency(request.getCurrency().toUpperCase())
                 .balance(initialBalance)
                 .minimumBalance(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_EVEN))
-                .status(AccountStatus.ACTIVE)   // skip PENDING_VERIFICATION for now; add KYC in Phase 6
+                .status(AccountStatus.ACTIVE)   // skip PENDING_VERIFICATION for now; add KYC
                 .build();
 
         Account saved = accountRepository.save(account);
@@ -189,7 +189,7 @@ public class AccountService {
         log.warn("Account '{}' closed and soft-deleted", accountNumber);
     }
 
-    // ── Internal helpers (called by LedgerService in Phase 3) ────────────────
+    // ── Internal helpers (called by LedgerService) ────────────────
 
     /**
      * Loads an account with a pessimistic write lock.
@@ -244,7 +244,7 @@ public class AccountService {
     /**
      * Generates the next account number.
      * Example: ACC-000001
-     * Thread-safe via AtomicLong; will be replaced with Redis INCR in Phase 4.
+     * Thread-safe via AtomicLong; will be replaced with Redis INCR.
      */
     private String generateAccountNumber() {
         // Initialise from DB count on first call (survives restarts)

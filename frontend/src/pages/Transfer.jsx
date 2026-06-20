@@ -16,6 +16,7 @@ import Card, { CardHeader } from "../components/Card";
 import Badge from "../components/Badge";
 import { PageSpinner } from "../components/Spinner";
 import styles from "./Transfer.module.css";
+import AccountSelect from "../components/AccountSelect";
 
 // Fee tier rates — mirror backend config
 const FEE_TIERS = [
@@ -45,34 +46,6 @@ function fmt(n, currency = "USD") {
   }).format(n);
 }
 
-// ── Account selector dropdown ──────────────────────────────────────────────
-function AccountSelect({ label, value, onChange, accounts, exclude, error }) {
-  const available = accounts.filter(
-    (a) => a.status === "ACTIVE" && a.accountNumber !== exclude,
-  );
-  return (
-    <div className={styles.selectWrap}>
-      <label className={styles.selectLabel}>{label}</label>
-      <div
-        className={`${styles.selectBox} ${error ? styles.selectError : ""} ${value ? styles.selectFilled : ""}`}
-      >
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className={styles.select}
-        >
-          <option value="">Select account</option>
-          {available.map((a) => (
-            <option key={a.id} value={a.accountNumber}>
-              {a.accountNumber} — {a.accountType} ({fmt(a.balance, a.currency)})
-            </option>
-          ))}
-        </select>
-      </div>
-      {error && <span className={styles.selectErrorMsg}>{error}</span>}
-    </div>
-  );
-}
 
 // ── Confirmation screen ────────────────────────────────────────────────────
 function ConfirmationScreen({

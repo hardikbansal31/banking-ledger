@@ -13,6 +13,7 @@ import { useAccountStore } from "../store/accountStore";
 import { transactionsApi } from "../api/transactions";
 import Card, { CardHeader } from "../components/Card";
 import Badge from "../components/Badge";
+import Select from "../components/Select";
 import { PageSpinner, EmptyState } from "../components/Spinner";
 import styles from "./Statement.module.css";
 
@@ -214,18 +215,15 @@ export default function Statement() {
         </div>
 
         {/* Account switcher */}
-        <div className={styles.accountPicker}>
-          <select
-            className={styles.accountSelect}
+        <div style={{ minWidth: 260 }}>
+          <Select
             value={selectedAccount}
-            onChange={(e) => setSelectedAccount(e.target.value)}
-          >
-            {accounts.map((a) => (
-              <option key={a.id} value={a.accountNumber}>
-                {a.accountNumber} · {a.accountType} ({a.currency})
-              </option>
-            ))}
-          </select>
+            onChange={setSelectedAccount}
+            options={accounts.map((a) => ({
+              value: a.accountNumber,
+              label: `${a.accountNumber} · ${a.accountType} (${a.currency})`,
+            }))}
+          />
         </div>
       </div>
 

@@ -27,10 +27,10 @@ import java.util.function.Function;
  * Why HS256 and not RS256?
  *   HS256 (symmetric) is correct for a monolith or single-service JWT issuer.
  *   RS256 (asymmetric) is better when multiple services verify tokens without
- *   sharing the secret — relevant in Phase 6 if you add a separate resource server.
+ *   sharing the secret — relevant if you add a separate resource server.
  *
  * This service is stateless — no DB calls, no cache — deliberately so.
- * Token revocation (logout) is handled via a Redis blacklist in Phase 4.
+ * Token revocation (logout) is handled via a Redis blacklist.
  */
 @Slf4j
 @Service

@@ -17,7 +17,7 @@ import java.util.UUID;
  * AccountRepository — data access for the accounts table.
  *
  * Note on PESSIMISTIC_WRITE:
- * Phase 4 uses Redisson distributed locks as the PRIMARY concurrency guard.
+ * Uses Redisson distributed locks as the PRIMARY concurrency guard.
  * findByIdForUpdate is a secondary DB-level lock used inside the same
  * transaction for extra safety. Both locks together prevent double-spending
  * even under network partition scenarios.
@@ -34,7 +34,7 @@ public interface AccountRepository extends JpaRepository<Account, UUID> {
     /**
      * Acquires a pessimistic write lock on the account row for the duration
      * of the calling @Transactional method. Used during debit/credit operations
-     * alongside the Redisson distributed lock in Phase 4.
+     * alongside the Redisson distributed lock.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT a FROM Account a WHERE a.id = :id")

@@ -16,7 +16,7 @@ spring:
   data:
     redis:
       host: localhost
-      port: 6380
+      port: 16379
       password: RedisDevPass@99
 
   # ── Redisson (redisson-spring-boot-starter reads spring.redis.redisson) ─────
@@ -25,7 +25,7 @@ spring:
     redisson:
       config: |
         singleServerConfig:
-          address: "redis://localhost:6380"
+          address: "redis://localhost:16379"
           password: "RedisDevPass@99"
           connectionMinimumIdleSize: 2
           connectionPoolSize: 10
@@ -54,11 +54,11 @@ app:
       expiration-ms: 3600000
       refresh-expiration-ms: 86400000
     cors:
-      allowed-origins: http://localhost:3000,http://localhost:5173
+      allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
 
   exchange-rate:
-    api-key: mock-key-not-needed-until-phase-5
-    base-url: https://v6.exchangerate-api.com/v6
+    api-key: mock-key-not-needed
+    base-url: ${EXCHANGE_RATE_BASE_URL:https://v6.exchangerate-api.com/v6}
     cache-ttl-minutes: 60
 
 # ── Logging ─────────────────────────────────────────────────────────────────

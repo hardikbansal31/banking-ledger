@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 export default function Modal({
   isOpen,
@@ -28,7 +29,7 @@ export default function Modal({
     lg: "800px",
   };
 
-  return (
+  return createPortal(
     <div
       className="modal-backdrop fade-in"
       style={{
@@ -41,7 +42,7 @@ export default function Modal({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 50,
+        zIndex: 1000,
         padding: "1rem",
       }}
       onClick={onClose} // Close when clicking the backdrop
@@ -91,6 +92,7 @@ export default function Modal({
         {/* Modal Body */}
         <div style={{ padding: "1.5rem" }}>{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
