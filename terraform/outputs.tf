@@ -1,7 +1,7 @@
 
-output "alb_dns_name" {
-  description = "Public URL of the Application Load Balancer (set this in Vercel as VITE_API_BASE_URL)"
-  value       = "http://${aws_lb.main.dns_name}"
+output "cloudfront_domain_name" {
+  description = "Secure CloudFront URL (set this in Vercel as VITE_API_BASE_URL)"
+  value       = "https://${aws_cloudfront_distribution.api.domain_name}"
 }
 
 output "ecr_repository_url" {
@@ -61,7 +61,7 @@ output "next_steps" {
     ║       --force-new-deployment                                    ║
     ║                                                                 ║
     ║  3. Set VITE_API_BASE_URL in Vercel to:                         ║
-    ║     http://${aws_lb.main.dns_name}                              ║
+    ║     https://${aws_cloudfront_distribution.api.domain_name}      ║
     ║                                                                 ║
     ╚══════════════════════════════════════════════════════════════════╝
 
