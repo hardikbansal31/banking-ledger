@@ -1,0 +1,28 @@
+# =============================================================================
+# Terraform Variables — COPY THIS TO terraform.tfvars AND FILL IN YOUR VALUES
+# =============================================================================
+# terraform.tfvars is gitignored — never commit real passwords!
+#
+# Usage:
+#   cp terraform.tfvars.example terraform.tfvars
+#   # Edit terraform.tfvars with your actual passwords
+#   terraform apply
+
+aws_region = "us-east-1"   # Change to "ap-south-1" if you chose Mumbai
+
+# ── Database ──
+db_password = "CHANGE_ME_SecurePass123!"   # Must be at least 8 characters
+
+# ── Redis ──
+redis_password = "CHANGE_ME_RedisProdPass99!"  # Must be 16-128 chars for ElastiCache AUTH
+
+# ── JWT ──
+# Generate with: openssl rand -base64 64
+jwt_secret = "CHANGE_ME_generate_with_openssl_rand_base64_64"
+
+# ── CORS ──
+# After deploying to Vercel, set this to your Vercel URL
+cors_allowed_origins = "https://your-app.vercel.app"
+
+# ── Exchange Rate API ──
+exchange_rate_api_key = "your-api-key-or-mock"

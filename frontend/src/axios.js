@@ -15,8 +15,17 @@ import toast from "react-hot-toast";
  * Import this (not raw axios) everywhere in the app.
  */
 
+const getBaseURL = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (!envUrl) return "/api/v1";
+  
+  // Ensure we strip trailing slash from envUrl if present, then append /api/v1
+  const cleanUrl = envUrl.endsWith('/') ? envUrl.slice(0, -1) : envUrl;
+  return `${cleanUrl}/api/v1`;
+};
+
 const api = axios.create({
-  baseURL: "/api/v1", // Vite proxy forwards to VITE_API_BASE_URL
+  baseURL: getBaseURL(),
   timeout: 15000,
   headers: {
     "Content-Type": "application/json",
@@ -81,7 +90,7 @@ api.interceptors.response.use(
         const refreshToken = localStorage.getItem("refreshToken");
         if (!refreshToken) throw new Error("No refresh token");
 
-        const { data } = await axios.post("/api/v1/auth/refresh", {
+        const { data } = await axios.post(`${getBaseURL()}/auth/refresh`, {
           refreshToken,
         });
         const newToken = data.accessToken;

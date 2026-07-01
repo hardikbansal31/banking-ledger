@@ -31,3 +31,15 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Terraform ###
+# State files contain sensitive data (passwords, endpoints)
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+terraform/*.auto.tfvars
+
+### Environment ###
+.env
