@@ -1,6 +1,9 @@
 # Banking Core & Distributed Ledger
 
-A production-quality banking backend built with **Java 21**, **Spring Boot 3.5**, and **MySQL**. Implements double-entry accounting, distributed locking, JWT authentication, a tiered fee engine, exchange rate integration, and Quartz-scheduled payments.
+A production-quality banking ledger system comprising a **React 19** frontend and a **Java 21 / Spring Boot 3.5** backend. Implements double-entry accounting, distributed locking, JWT authentication, a tiered fee engine, exchange rate integration, and Quartz-scheduled payments.
+
+- **Live Frontend**: [https://banking-ledger-seven.vercel.app/](https://banking-ledger-seven.vercel.app/)
+- **Live Backend API**: [https://doobbl97fb0lb.cloudfront.net/api/v1/actuator/health](https://doobbl97fb0lb.cloudfront.net/api/v1/actuator/health)
 
 Built as a portfolio project targeting backend engineering roles at Tier-1 financial institutions.
 
@@ -142,6 +145,50 @@ mvn spring-boot:run
 Spring Boot auto-creates all tables on first start (`ddl-auto: update`).
 
 The app starts at: `http://localhost:8080/api/v1`
+
+---
+
+## Production Deployment
+
+This application is deployed in a hybrid cloud topology to optimize cost, reliability, and security:
+
+- **Frontend**: Hosted on **Vercel** (with automated CI/CD builds on git pushes).
+- **Backend API**: Hosted on **AWS ECS Fargate** with **RDS MySQL 8.4** and **ElastiCache Redis 7.2** databases.
+- **SSL/HTTPS Proxy**: Serviced by **Amazon CloudFront**. Because Vercel serves the React client over HTTPS, modern browsers restrict calling the default HTTP load balancer due to *Mixed Content* blocking. Placing CloudFront in front of the Application Load Balancer (ALB) terminates SSL/HTTPS using a wildcard `*.cloudfront.net` certificate at zero cost (no custom domain registration needed).
+- **Networking**: Configured via **Terraform** inside a custom VPC with a NAT-less topology. The ALB and ECS containers span multiple public subnets (ECS ingress is restricted strictly to ALB security groups) to enable cheap, direct image downloads from ECR, while DB instances are isolated inside private subnets.
+
+### Deploying the Backend Infrastructure
+The AWS infrastructure is fully managed via Terraform:
+1. Initialize and apply the configuration:
+   ```bash
+   cd terraform
+   terraform init
+   terraform apply -auto-approve
+   ```
+2. Build, tag, and push the backend container to AWS ECR using the output repository URL.
+3. Perform a rolling update to download the new image and start the container tasks:
+   ```bash
+   aws ecs update-service --cluster banking-ledger-cluster --service banking-ledger-service --force-new-deployment
+   ```
+
+### Cost Optimization: Destroying & Recreating
+To avoid consuming AWS credits when the demo is not actively in use, you can destroy all AWS resources and spin them back up later. 
+
+> [!WARNING]
+> Running `terraform destroy` will delete all cloud databases, meaning any accounts or transactions created on the demo will be permanently wiped.
+
+#### 1. Tearing Down (Stop AWS Charges)
+Run this command from the `terraform/` directory:
+```bash
+terraform destroy -auto-approve
+```
+
+#### 2. Re-spinning Up Later
+Because AWS dynamically assigns hostnames on creation, the new endpoints (CloudFront, ALB, RDS, Redis) will have different URLs.
+1. Run `terraform apply -auto-approve` inside `terraform/`.
+2. Grab the newly generated secure HTTPS CloudFront URL from the output (e.g., `https://xxxx.cloudfront.net`).
+3. Update `VITE_API_BASE_URL` in your Vercel Dashboard (or update `frontend/.env.production` and push to git).
+4. Run a **Redeploy** on Vercel so the frontend compiles with the new API endpoint.
 
 ---
 
