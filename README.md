@@ -1,332 +1,139 @@
 # Banking Core & Distributed Ledger
 
-A production-quality banking ledger system comprising a **React 19** frontend and a **Java 21 / Spring Boot 3.5** backend. Implements double-entry accounting, distributed locking, JWT authentication, a tiered fee engine, exchange rate integration, and Quartz-scheduled payments.
+A high-performance, double-entry banking ledger system built with **Java 21 / Spring Boot 3.5** and **React 19**. Designed for zero money leakage, multi-tier concurrency protection, idempotency, and hybrid cloud deployment.
 
 - **Live Frontend**: [https://banking-ledger-seven.vercel.app/](https://banking-ledger-seven.vercel.app/)
 - **Live Backend API**: [https://doobbl97fb0lb.cloudfront.net/api/v1/actuator/health](https://doobbl97fb0lb.cloudfront.net/api/v1/actuator/health)
 
-Built as a portfolio project targeting backend engineering roles at Tier-1 financial institutions.
+Built as a portfolio project targeting backend engineering roles.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/2accounts.png" width="100%" />
+</p>
+<p align="center">
+  <img src="docs/images/signup.png" width="49%" />
+  <img src="docs/images/transfer.png" width="49%" />
+</p>
+
+---
+
+## Technical Highlights & Engineering Decisions
+
+### 1. 3-Tier Concurrency Control & Double-Spend Prevention
+To prevent race conditions, double-spending, and deadlocks when processing simultaneous fund transfers across distributed instances:
+
+1. **Outer Guard — Distributed Redisson Lock**: Acquired at the controller level (outside `@Transactional`) using Redis distributed locks (`RLock`). Prevents duplicate requests across horizontally scaled app instances before opening a database connection.
+2. **Middle Guard — DB Pessimistic Row Locking (`SELECT FOR UPDATE`)**: Acquired inside the transaction. To prevent database deadlocks when two accounts transfer funds to each other simultaneously, account locks are always acquired in **sorted Account UUID order**.
+3. **Inner Guard — Optimistic Locking (`@Version`)**: JPA version checks catch edge cases and throw `OptimisticLockingFailureException` if concurrent modifications slip past outer guards.
+
+### 2. Immutable Double-Entry Accounting Engine
+* **Atomic Transactions**: Every financial transfer generates exactly two immutable `LedgerEntry` records (`DEBIT` on source, `CREDIT` on destination) committed atomically inside a single `@Transactional` boundary. Money is strictly conserved.
+* **Strict Immutability**: The `@PreUpdate` lifecycle hook on `LedgerEntry` entities throws an `IllegalStateException` if Hibernate attempts an `UPDATE`. Corrections require explicit reversal entries.
+* **Exact Financial Precision**: All monetary values use Java `BigDecimal` with `RoundingMode.HALF_EVEN` (banker's rounding) to prevent IEEE 754 floating-point cumulative rounding errors.
+
+### 3. Hybrid Cloud Infrastructure & Zero-Cost SSL Proxy
+* **Cost-Efficient Topography**: Hosted on **AWS ECS Fargate**, **RDS MySQL 8.4**, and **ElastiCache Redis 7.2** provisioned via **Terraform IaC**.
+* **SSL Termination via CloudFront**: Solves browser HTTPS Mixed-Content blocking from Vercel by routing requests through CloudFront with free `*.cloudfront.net` SSL termination to an HTTP Application Load Balancer.
+* **NAT-Less VPC Design**: ALB and ECS containers span public subnets with strict security group isolation to enable direct container image pulls from ECR without incurring costly AWS NAT Gateway hourly fees.
+
+### 4. Enterprise Resilience & Standards
+* **Idempotency Guarantee**: Accepts `idempotencyKey` headers on transfers. Idempotent requests are cached in Redis to prevent duplicate processing from network retries.
+* **RFC 7807 Standardized Errors**: API exceptions return structured `ProblemDetail` payloads containing machine-readable error types, details, and correlation request IDs.
+* **MDC Request Tracing**: Every inbound request is assigned a unique `requestId` via an HTTP filter, injected into the `MDC` context, and included in every log statement and `X-Request-Id` response header.
+
+---
+
+## Architecture & Request Flow
+
+```text
+Client (React 19 / Vercel)
+        │ (HTTPS)
+        ▼
+Amazon CloudFront (SSL Termination)
+        │ (HTTP / ALB)
+        ▼
+AWS ECS Fargate (Spring Boot 3.5)
+  ├── 1. MdcRequestLoggingFilter    ──► Injects unique requestId into MDC
+  ├── 2. JwtAuthenticationFilter    ──► Validates JWT Bearer & Redis Token Blacklist
+  └── 3. SecurityFilterChain        ──► Enforces RBAC (ROLE_USER, ROLE_ADMIN)
+        ↓
+  TransactionController
+        │
+        ├── Acquires Redisson Distributed Lock (sorted lock keys)
+        ▼
+  LedgerService (@Transactional)
+        ├── Acquired DB Pessimistic Lock (`SELECT FOR UPDATE` in sorted account order)
+        ├── FeeEngine (Calculates tiered fees)
+        ├── ExchangeRateService (WebClient + Redis 60-min cache)
+        └── TransactionStateMachine (PENDING ──► AUTHORIZED ──► SETTLED)
+        ↓
+  MySQL 8.4 (Atomic commit of DEBIT + CREDIT LedgerEntries)
+```
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Language | Java 21 (virtual threads ready) |
-| Framework | Spring Boot 3.5.11 |
-| Database | MySQL 8.4 (JPA / Hibernate 6) |
-| Cache & Locks | Redis 7.2 via Redisson 3.27.2 |
-| Security | Spring Security + JWT (jjwt 0.12.5, HS384) |
-| Scheduler | Quartz 2.x (in-memory dev, JDBC prod) |
-| HTTP Client | Spring WebFlux WebClient |
-| Observability | Spring Boot Actuator + Micrometer |
-| Build | Maven 3.9+ |
+| Layer | Technology | Selection Rationale |
+|---|---|---|
+| **Language** | Java 21 | Modern syntax, virtual thread support ready, pattern matching. |
+| **Framework** | Spring Boot 3.5.11 | Production-grade REST, Spring Security 6, Spring Data JPA. |
+| **Database** | MySQL 8.4 | ACID compliance, transactional integrity, pessimistic locking support. |
+| **Cache & Locks** | Redis 7.2 (Redisson 3.27) | Distributed locks (`RLock`), JWT token blacklist, exchange rate caching. |
+| **Security** | Spring Security + JWT | Stateless authentication with HS384 signed JWTs and token revocation. |
+| **Scheduler** | Quartz 2.x | Distributed recurring payments engine with cron trigger execution. |
+| **Observability** | Actuator + Micrometer | Custom business metrics (settled totals, fee revenue) & Prometheus scrapers. |
+| **Infrastructure** | Terraform & AWS Fargate | Infrastructure-as-Code for multi-AZ ECS Fargate, RDS, ElastiCache, and ALB. |
 
 ---
 
-## Architecture
+## API Reference Overview
 
+All REST API endpoints are versioned under `/api/v1`. Protected endpoints require `Authorization: Bearer <token>`.
+
+### Key Endpoints
+
+| Category | Method | Endpoint | Description |
+|---|---|---|---|
+| **Auth** | `POST` | `/api/v1/auth/register` | User registration |
+| **Auth** | `POST` | `/api/v1/auth/login` | Authenticate and obtain JWT pair |
+| **Auth** | `POST` | `/api/v1/auth/refresh` | Refresh expired access token |
+| **Accounts** | `POST` | `/api/v1/accounts` | Open checking/savings account |
+| **Accounts** | `GET` | `/api/v1/accounts` | List authenticated user's accounts |
+| **Transactions**| `POST` | `/api/v1/transactions/transfer` | Execute atomic double-entry transfer |
+| **Transactions**| `GET` | `/api/v1/accounts/{number}/statement` | Retrieve paginated ledger audit statement |
+| **Scheduler** | `POST` | `/api/v1/scheduled-payments` | Create recurring cron-scheduled payment |
+| **Exchange** | `GET` | `/api/v1/exchange-rates/{from}/{to}` | Fetch real-time / cached FX conversion rate |
+
+<details>
+<summary><strong>View Transfer Request Payload Example</strong></summary>
+
+```json
+POST /api/v1/transactions/transfer
+Header: Authorization: Bearer <token>
+
+{
+  "sourceAccountNumber": "ACC-000001",
+  "destinationAccountNumber": "ACC-000002",
+  "amount": "500.00",
+  "currency": "USD",
+  "description": "Monthly rent payment",
+  "idempotencyKey": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+}
 ```
-HTTP Request
-  ├── MdcRequestLoggingFilter     (requestId injected into every log line)
-  ├── JwtAuthenticationFilter     (validates Bearer token, checks blacklist)
-  └── SecurityFilterChain         (RBAC: ADMIN / USER)
-        ↓
-  Controller  (thin — validates input, delegates)
-        ↓
-  Service     (@Transactional, @PreAuthorize, business logic)
-     ├── DistributedLockService   (Redisson RLock — outer concurrency guard)
-     ├── LedgerService            (double-entry accounting engine)
-     ├── FeeEngine                (tiered fee calculation)
-     ├── ExchangeRateService      (WebClient + Redis cache)
-     └── TransactionStateMachine  (PENDING → AUTHORIZED → SETTLED / FAILED)
-        ↓
-  Repository  (Spring Data JPA → MySQL)
-```
 
-### Double-Entry Ledger
-
-Every financial transaction produces exactly two immutable `LedgerEntry` rows:
-
-```
-Transfer $500 from ACC-000001 → ACC-000002
-
-ledger_entries:
-  account=ACC-000001  type=DEBIT   amount=500.00  balance_after=4500.00
-  account=ACC-000002  type=CREDIT  amount=500.00  balance_after=5500.00
-```
-
-Both entries commit atomically via `@Transactional`. If either fails, both roll back. Money is never created or destroyed.
-
-### Concurrency Model
-
-Three guards prevent double-spending:
-
-1. **Redisson distributed lock** — outer guard, acquired at controller level before `@Transactional` opens. Prevents concurrent requests across multiple app instances.
-2. **DB pessimistic lock** (`SELECT FOR UPDATE`) — inner guard, acquired inside the transaction in consistent ID order to prevent deadlock.
-3. **Optimistic lock** (`@Version` on entities) — catches the rare case where two transactions slip through both locks and try to modify the same row.
+</details>
 
 ---
 
-## Project Structure
+## Observability & Metrics
 
-```
-src/main/java/com/bankingcore/bankingledger/
-├── config/          Spring configuration beans
-├── controller/      REST controllers (thin layer)
-├── domain/
-│   ├── entity/      JPA entities (User, Account, Transaction, LedgerEntry, ...)
-│   ├── enums/       Domain enums (Role, TransactionStatus, EntryType, ...)
-│   └── repository/  Spring Data JPA repositories
-├── dto/
-│   ├── request/     Validated request DTOs
-│   └── response/    Response DTOs (never expose entities directly)
-├── exception/       Domain exception hierarchy + GlobalExceptionHandler
-├── security/
-│   ├── filter/      JwtAuthenticationFilter, MdcRequestLoggingFilter, SecurityExceptionHandler
-│   └── service/     JwtService, UserDetailsServiceImpl
-└── service/         Business logic (LedgerService, FeeEngine, ExchangeRateService, ...)
-```
-
----
-
-## Prerequisites
-
-- Java 21+
-- Maven 3.9+
-- MySQL 8.x running locally
-- Docker (for Redis only)
-
----
-
-## Local Setup
-
-### 1. Database
-
-Connect to your local MySQL as root and run:
-
-```sql
-CREATE DATABASE banking_ledger CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-GRANT ALL PRIVILEGES ON banking_ledger.* TO 'your_user'@'localhost';
-FLUSH PRIVILEGES;
-```
-
-### 2. Redis
+Prometheus & Micrometer custom business metrics are exposed via Spring Boot Actuator:
 
 ```bash
-docker compose up -d
-```
-
-This starts Redis 7.2 on port 6380 with password authentication and AOF persistence.
-
-### 3. Configuration
-
-```bash
-cp .env.example .env
-```
-
-Edit `src/main/resources/application-development.yml` and set:
-```yaml
-spring:
-  datasource:
-    username: your_mysql_user
-    password: your_mysql_password
-```
-
-The development profile activates automatically. All other config has working defaults.
-
-### 4. Run
-
-```bash
-mvn spring-boot:run
-```
-
-Spring Boot auto-creates all tables on first start (`ddl-auto: update`).
-
-The app starts at: `http://localhost:8080/api/v1`
-
----
-
-## Production Deployment
-
-This application is deployed in a hybrid cloud topology to optimize cost, reliability, and security:
-
-- **Frontend**: Hosted on **Vercel** (with automated CI/CD builds on git pushes).
-- **Backend API**: Hosted on **AWS ECS Fargate** with **RDS MySQL 8.4** and **ElastiCache Redis 7.2** databases.
-- **SSL/HTTPS Proxy**: Serviced by **Amazon CloudFront**. Because Vercel serves the React client over HTTPS, modern browsers restrict calling the default HTTP load balancer due to *Mixed Content* blocking. Placing CloudFront in front of the Application Load Balancer (ALB) terminates SSL/HTTPS using a wildcard `*.cloudfront.net` certificate at zero cost (no custom domain registration needed).
-- **Networking**: Configured via **Terraform** inside a custom VPC with a NAT-less topology. The ALB and ECS containers span multiple public subnets (ECS ingress is restricted strictly to ALB security groups) to enable cheap, direct image downloads from ECR, while DB instances are isolated inside private subnets.
-
-### Deploying the Backend Infrastructure
-The AWS infrastructure is fully managed via Terraform:
-1. Initialize and apply the configuration:
-   ```bash
-   cd terraform
-   terraform init
-   terraform apply -auto-approve
-   ```
-2. Build, tag, and push the backend container to AWS ECR using the output repository URL.
-3. Perform a rolling update to download the new image and start the container tasks:
-   ```bash
-   aws ecs update-service --cluster banking-ledger-cluster --service banking-ledger-service --force-new-deployment
-   ```
-
-### Cost Optimization: Destroying & Recreating
-To avoid consuming AWS credits when the demo is not actively in use, you can destroy all AWS resources and spin them back up later. 
-
-> [!WARNING]
-> Running `terraform destroy` will delete all cloud databases, meaning any accounts or transactions created on the demo will be permanently wiped.
-
-#### 1. Tearing Down (Stop AWS Charges)
-Run this command from the `terraform/` directory:
-```bash
-terraform destroy -auto-approve
-```
-
-#### 2. Re-spinning Up Later
-Because AWS dynamically assigns hostnames on creation, the new endpoints (CloudFront, ALB, RDS, Redis) will have different URLs.
-1. Run `terraform apply -auto-approve` inside `terraform/`.
-2. Grab the newly generated secure HTTPS CloudFront URL from the output (e.g., `https://xxxx.cloudfront.net`).
-3. Update `VITE_API_BASE_URL` in your Vercel Dashboard (or update `frontend/.env.production` and push to git).
-4. Run a **Redeploy** on Vercel so the frontend compiles with the new API endpoint.
-
----
-
-## API Reference
-
-All endpoints are prefixed with `/api/v1`. Protected endpoints require `Authorization: Bearer <token>`.
-
-### Authentication
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| POST | `/auth/register` | None | Register new user |
-| POST | `/auth/login` | None | Login, receive JWT pair |
-| POST | `/auth/refresh` | None | Refresh access token |
-| POST | `/auth/logout` | JWT | Blacklist current token |
-
-**Register:**
-```bash
-curl -X POST http://localhost:8080/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"username":"alice","email":"alice@test.com","password":"Password1",
-       "firstName":"Alice","lastName":"Smith"}'
-```
-
-**Login:**
-```bash
-curl -X POST http://localhost:8080/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"alice","password":"Password1"}'
-```
-
-### Accounts
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| POST | `/accounts` | JWT | Open new account |
-| GET | `/accounts` | JWT | List my accounts |
-| GET | `/accounts/{number}` | JWT | Get account details |
-| POST | `/admin/accounts/{number}/freeze` | ADMIN | Freeze account |
-| POST | `/admin/accounts/{number}/activate` | ADMIN | Activate account |
-| DELETE | `/admin/accounts/{number}` | ADMIN | Close account |
-
-**Open an account:**
-```bash
-curl -X POST http://localhost:8080/api/v1/accounts \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"accountType":"CHECKING","currency":"USD","initialDeposit":"1000.00"}'
-```
-
-### Transactions
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| POST | `/transactions/transfer` | JWT | Transfer between accounts |
-| GET | `/transactions/{id}` | JWT | Get transaction detail |
-| GET | `/accounts/{number}/transactions` | JWT | Paginated transaction list |
-| GET | `/accounts/{number}/statement` | JWT | Paginated ledger entries |
-| POST | `/admin/transactions/deposit` | ADMIN | Deposit funds |
-
-**Transfer (with idempotency key):**
-```bash
-curl -X POST http://localhost:8080/api/v1/transactions/transfer \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sourceAccountNumber": "ACC-000001",
-    "destinationAccountNumber": "ACC-000002",
-    "amount": "500.00",
-    "currency": "USD",
-    "description": "Rent payment",
-    "idempotencyKey": "unique-client-uuid-here"
-  }'
-```
-
-**Fee tiers** (applied automatically on every transfer):
-
-| Amount | Rate |
-|--------|------|
-| < $1,000 | 1.50% |
-| $1,000 – $9,999 | 1.00% |
-| ≥ $10,000 | 0.50% |
-
-### Scheduled Payments
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| POST | `/scheduled-payments` | JWT | Create recurring payment |
-| GET | `/scheduled-payments` | JWT | List my scheduled payments |
-| DELETE | `/scheduled-payments/{id}` | JWT | Cancel scheduled payment |
-
-**Create a monthly recurring payment:**
-```bash
-curl -X POST http://localhost:8080/api/v1/scheduled-payments \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sourceAccountNumber": "ACC-000001",
-    "destinationAccountNumber": "ACC-000002",
-    "amount": "1200.00",
-    "currency": "USD",
-    "description": "Monthly rent",
-    "cronExpression": "0 0 9 1 * ?"
-  }'
-```
-
-Cron format: `seconds minutes hours dayOfMonth month dayOfWeek`
-
-### Exchange Rates
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/exchange-rates/{from}/{to}` | JWT | Get current rate (cached 60 min) |
-| DELETE | `/admin/exchange-rates/{from}/{to}/cache` | ADMIN | Evict cached rate |
-
-### Users (Admin)
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/users/me` | JWT | Get own profile |
-| GET | `/admin/users` | ADMIN | List all users |
-| GET | `/admin/users/{id}` | ADMIN | Get user by ID |
-| POST | `/admin/users/{id}/promote` | ADMIN | Promote to ADMIN |
-| POST | `/admin/users/{id}/lock` | ADMIN | Lock user account |
-| DELETE | `/admin/users/{id}` | ADMIN | Soft-delete user |
-
----
-
-## Observability
-
-### Health Check
-```bash
-curl http://localhost:8080/api/v1/actuator/health
-```
-
-### Custom Metrics
-```bash
-# Requires HTTP Basic: actuator_admin / ActuatorDev@55
+# Custom business metrics (requires Basic Auth)
 curl -u actuator_admin:ActuatorDev@55 \
   http://localhost:8080/api/v1/actuator/metrics/banking.transactions.settled.total
 
@@ -334,61 +141,60 @@ curl -u actuator_admin:ActuatorDev@55 \
   http://localhost:8080/api/v1/actuator/metrics/banking.fees.collected.total
 ```
 
-### Prometheus Scrape
-```bash
-curl -u actuator_admin:ActuatorDev@55 \
-  http://localhost:8080/api/v1/actuator/prometheus
-```
-
-All HTTP requests are logged with:
-- `requestId` — unique UUID per request (also returned as `X-Request-Id` response header)
-- `userId` — authenticated username
-- Method, URI, status code, duration
-
 ---
 
-## Error Responses
+## Setup & Deployment
 
-All errors follow [RFC 7807 Problem Detail](https://www.rfc-editor.org/rfc/rfc7807):
-
-```json
-{
-  "type": "https://banking-ledger.io/errors/insufficient-funds",
-  "title": "Insufficient Funds",
-  "status": 422,
-  "detail": "Account ACC-000001 has insufficient funds. Available: 100.00, Required: 500.00.",
-  "instance": "/api/v1/transactions/transfer",
-  "timestamp": "2026-03-22T16:00:00Z",
-  "requestId": "a1b2c3d4-..."
-}
-```
-
----
-
-## Key Design Decisions
-
-**Why BigDecimal everywhere?**
-`double` cannot represent 0.1 exactly in binary floating-point. `0.1 + 0.2 == 0.30000000000000004` in Java. On financial amounts, this causes rounding errors that accumulate across millions of transactions. `BigDecimal` is exact. Every monetary field in the codebase uses `BigDecimal` with `RoundingMode.HALF_EVEN` (banker's rounding).
-
-**Why immutable LedgerEntry?**
-Banking regulations require a complete, unalterable audit trail. If a transaction was wrong, you create a REVERSAL with new entries in the opposite direction. The `@PreUpdate` hook on `LedgerEntry` throws `IllegalStateException` if Hibernate tries to issue an UPDATE — making mutation impossible at the application layer.
-
-**Why distributed locks outside @Transactional?**
-Spring `@Transactional` works through a proxy. Calling a `@Transactional` method from within the same class bypasses the proxy — the annotation is silently ignored. The distributed lock is acquired at the controller level, which then calls `ledgerService.transfer()` through the injected Spring proxy. This ensures: Redis lock held → DB transaction open → DB pessimistic lock held — all three guards active simultaneously.
-
-**Why soft delete?**
-No user or account row is ever physically deleted. Soft deletion sets `deleted = true` and `deleted_at = now()`. All repositories use `@SQLRestriction("deleted = false")` to filter deleted records automatically. This preserves audit trails and allows account recovery.
-
----
-
-## Running Tests
+### 1. Simple Local Running (Docker Compose)
+Run the entire full-stack application (React frontend, Spring Boot backend, MySQL 8.4 database, and Redis 7.2 cache) locally with a single command:
 
 ```bash
-mvn test
+docker compose up -d --build
 ```
+
+- **Frontend App**: `http://localhost:3000`
+- **Backend API**: `http://localhost:8080/api/v1`
+
+---
+
+### 2. Production Deployment (AWS & Terraform)
+
+To deploy the production backend infrastructure on AWS:
+
+#### Step 1: Provision Infrastructure with Terraform
+```bash
+cd terraform
+terraform init
+terraform apply -auto-approve
+```
+
+#### Step 2: Build & Push Container Image to ECR
+```bash
+# Return to root directory
+cd ..
+
+# Authenticate Docker to AWS ECR
+aws ecr get-login-password --region <aws-region> | docker login --username AWS --password-stdin <ecr-repo-url>
+
+# Build, tag, and push image
+docker build -t banking-ledger-backend .
+docker tag banking-ledger-backend:latest <ecr-repo-url>:latest
+docker push <ecr-repo-url>:latest
+```
+
+#### Step 3: Trigger Rolling Deployment on ECS
+```bash
+aws ecs update-service \
+  --cluster banking-ledger-cluster \
+  --service banking-ledger-service \
+  --force-new-deployment
+```
+
+#### Step 4: Configure Frontend
+Set the `VITE_API_BASE_URL` environment variable in your Vercel project settings to the CloudFront URL generated by Terraform (`https://<cloudfront-id>.cloudfront.net`), then redeploy the Vercel application.
 
 ---
 
 ## License
 
-MIT
+[MIT](LICENSE)
