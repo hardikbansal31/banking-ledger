@@ -179,8 +179,8 @@ public class LedgerService {
         log.debug("Transaction {} PENDING → AUTHORIZED", transaction.getId());
 
         try {
-            // Double-entry: DEBIT source account
-            source.debit(roundedAmount);
+            // Double-entry: DEBIT source account (amount + fee)
+            source.debit(totalDebit);
             accountRepository.save(source);
 
             LedgerEntry debitEntry = LedgerEntry.builder()

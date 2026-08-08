@@ -112,8 +112,8 @@ class LedgerServiceTest {
         assertThat(destAccount.getBalance()).isEqualByComparingTo(new BigDecimal("600.00"));
 
         verify(ledgerEntryRepository, times(2)).save(any(LedgerEntry.class)); // 1 debit, 1 credit
-        verify(transactionRepository).save(any(Transaction.class));
-        assertThat(response.getStatus()).isEqualTo(TransactionStatus.SETTLED.name());
+        verify(transactionRepository, times(3)).save(any(Transaction.class));
+        assertThat(response.getStatus()).isEqualTo(TransactionStatus.SETTLED);
     }
 
     // Guards against: Processing the same client request twice (double-charging)
